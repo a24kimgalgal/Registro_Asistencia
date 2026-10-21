@@ -25,7 +25,7 @@ describe('initial calendar screen', () => {
     });
     await flushPromises();
 
-    expect(wrapper.text()).toContain('Sin curso seleccionado');
+    expect(wrapper.text()).toContain('El calendario aún no está conectado a tus cursos');
     expect(wrapper.text()).toContain('No se muestran clases ni asistencias de ejemplo.');
     expect(wrapper.text()).toContain('Pendientes');
     expect(wrapper.text()).toContain('Falta');
@@ -68,7 +68,7 @@ describe('initial calendar screen', () => {
     await wrapper.findAll('button')
       .find((button) => button.text().trim() === 'Materias')
       .trigger('click');
-    expect(wrapper.text()).toContain('Esta sección estará disponible');
+    expect(wrapper.text()).toContain('Gestiona materias desde la sección de administración.');
     expect(wrapper.text()).not.toContain('Resumen del mes');
 
     wrapper.unmount();

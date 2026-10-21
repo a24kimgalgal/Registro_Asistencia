@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import AdminPanel from './components/AdminPanel.vue';
 import { useHealthStore } from './stores/health.js';
 
 const health = useHealthStore();
@@ -8,7 +9,7 @@ const displayedMonth = ref(startOfMonth(new Date()));
 const currentMonth = startOfMonth(new Date());
 const earliestMonth = addMonths(currentMonth, -6);
 const latestMonth = addMonths(currentMonth, 5);
-const sections = ['Calendario', 'Materias', 'Horario'];
+const sections = ['Calendario', 'Materias', 'Horario', 'Administración'];
 const attendanceSummary = [
   { label: 'Presentes', status: 'present' },
   { label: 'Faltas', status: 'absent' },
@@ -110,22 +111,13 @@ onMounted(() => {
           </a>
           <div class="course-actions">
             <v-btn
-              class="course-selector"
-              variant="outlined"
-              rounded="lg"
-              disabled
-              aria-label="Sin curso seleccionado"
-            >
-              Sin curso seleccionado
-            </v-btn>
-            <v-btn
               class="course-config"
               color="primary"
               variant="tonal"
               rounded="lg"
-              disabled
+              @click="activeSection = 'Administración'"
             >
-              Configurar curso
+              Administración
             </v-btn>
           </div>
         </header>
@@ -193,7 +185,7 @@ onMounted(() => {
 
             <p v-if="isAtMonthLimit" class="range-note">
               Puedes consultar hasta 12 meses en esta vista. El límite exacto del
-              curso estará disponible al conectar la gestión de cursos.
+              curso aparecerá cuando el calendario use las fechas guardadas.
             </p>
 
             <section class="summary-section" aria-labelledby="summary-heading">
@@ -253,11 +245,11 @@ onMounted(() => {
               <div class="empty-state" role="status">
                 <span class="empty-state-mark" aria-hidden="true">+</span>
                 <div>
-                  <h3>Primero, configura tu curso</h3>
+                  <h3>El calendario aún no está conectado a tus cursos</h3>
                   <p>
-                    No hay ningún curso seleccionado. Cuando esté disponible la
-                    gestión de cursos, podrás crear uno o elegirlo aquí. No se
-                    muestran clases ni asistencias de ejemplo.
+                    Puedes crear tus cursos y horarios desde Administración. Las
+                    clases aparecerán aquí cuando conectemos el calendario a esos
+                    datos. No se muestran clases ni asistencias de ejemplo.
                   </p>
                 </div>
               </div>
@@ -279,20 +271,22 @@ onMounted(() => {
             </section>
           </template>
 
+          <AdminPanel v-else-if="activeSection === 'Administración'" />
+
           <section v-else class="section-placeholder" aria-live="polite">
             <p class="eyebrow">{{ activeSection.toLocaleUpperCase('es-ES') }}</p>
             <h2>{{ activeSection }} del curso</h2>
             <p>
-              Esta sección estará disponible cuando se implemente la gestión del
-              curso. No hay información para mostrar todavía.
+              Gestiona {{ activeSection.toLocaleLowerCase('es-ES') }} desde la sección de administración.
+              No hay información para mostrar todavía.
             </p>
             <v-btn
               color="primary"
               variant="tonal"
               rounded="lg"
-              @click="activeSection = 'Calendario'"
+              @click="activeSection = 'Administración'"
             >
-              Volver al calendario
+              Abrir administración
             </v-btn>
           </section>
 
@@ -309,8 +303,8 @@ onMounted(() => {
                 {{ health.message }}
               </p>
               <p class="connection-detail">
-                La API actual solo permite comprobar la conexión. Los datos del
-                calendario todavía no están disponibles.
+                La API permite administrar cursos, materias, profesores y horario semanal.
+                El calendario todavía no carga las asistencias desde el servidor.
               </p>
             </div>
             <v-btn

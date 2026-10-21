@@ -2,7 +2,7 @@
 
 ## Estado Actual
 
-Implementación inicial. Existe la migración PostgreSQL y un backend Express mínimo que comprueba la conexión a la base de datos al arrancar y ofrece `GET /api/v1/health`. El backend toma la URL de conexión de `DATABASE_URL`; aún no se ha configurado una instancia real en este entorno. El frontend Vue 3, Vuetify y Pinia ofrece una pantalla inicial de calendario sin datos ficticios, con navegación mensual en una ventana visual de 12 meses, estados vacíos, navegación entre secciones y comprobación de salud. Los endpoints de cursos, materias, horarios y asistencias siguen pendientes; los límites visuales actuales no representan las fechas de un curso real.
+Implementación inicial en curso. El backend Express comprueba la conexión a la base de datos al arrancar y ofrece CRUD de cursos, materias y profesores, además de crear, consultar y revisar asignaciones de horario semanal con profesor. El frontend Vue 3, Vuetify y Pinia tiene una sección de administración conectada a esas rutas para gestionar cursos, materias, profesores y horario semanal; cursos se borran solo si no tienen datos relacionados, materias y profesores se desactivan para preservar el historial y los cambios del horario crean una nueva vigencia. Las asistencias y el calendario mensual derivado aún están pendientes. El backend toma la URL de conexión de `DATABASE_URL`; aún no se ha configurado una instancia real en este entorno.
 
 ## Decisión de Base de Datos
 
@@ -49,10 +49,11 @@ Backend y frontend mantienen sus dependencias y comandos separados. Los workflow
 
 ## Esquemas de Datos (Modelos)
 
-- La migración inicial está en `backend/database/migrations/001_initial_schema.sql`. El esquema está implementado en PostgreSQL sin acoplarlo todavía a un ORM concreto.
+- Las migraciones están en `backend/database/migrations/001_initial_schema.sql` y `002_teachers_and_schedule.sql`. El esquema está implementado en PostgreSQL sin acoplarlo todavía a un ORM concreto.
 - **Course** (`courses`): `id` (`bigint` identity), `name`, `academic_year`, `start_date`, `end_date`, `is_current` (por defecto `false`) y `created_at` (`timestamptz`). `end_date` no puede preceder a `start_date`; el par (`academic_year`, `name`) es único y un índice único parcial permite un solo curso actual.
 - **Subject** (`subjects`): `id`, `course_id`, `name`, `color` opcional, `is_active` (por defecto `true`) y `created_at`. Relación N:1 con Course. El nombre no se repite dentro del mismo curso, sin distinguir mayúsculas/minúsculas. Para retirar materias se cambia `is_active`; las claves foráneas impiden borrar cursos o materias con historial dependiente.
-- **ScheduleEntry** (`schedule_entries`): `id`, `course_id`, `subject_id`, `weekday` (ISO: lunes=1 a viernes=5), `start_time`, `end_time`, `valid_from`, `valid_until` opcional. Relación N:1 con Course y Subject; una clave foránea compuesta garantiza que la materia pertenezca al mismo curso. La vigencia se interpreta como intervalo semiabierto `[valid_from, valid_until)`, por lo que `valid_until` no forma parte del período. Los horarios no pueden tener fin anterior o igual al inicio ni solaparse en día, hora y período de vigencia. Una vez creada una asignación, su curso, materia, día, horas y comienzo son inmutables; se cierra asignando `valid_until` y se inserta otra asignación para preservar el historial.
+- **Teacher** (`teachers`): `id`, `name`, `is_active` (por defecto `true`) y `created_at`. Es un catálogo común de profesores. Los nombres de profesores activos no se repiten sin distinguir mayúsculas/minúsculas; retirar un profesor lo desactiva y conserva el historial.
+- **ScheduleEntry** (`schedule_entries`): `id`, `course_id`, `subject_id`, `teacher_id` opcional, `weekday` (ISO: lunes=1 a viernes=5), `start_time`, `end_time`, `valid_from`, `valid_until` opcional. Relación N:1 con Course, Subject y Teacher; una clave foránea compuesta garantiza que la materia pertenezca al mismo curso. La vigencia se interpreta como intervalo semiabierto `[valid_from, valid_until)`, por lo que `valid_until` no forma parte del período. Los horarios no pueden tener fin anterior o igual al inicio ni solaparse en día, hora y período de vigencia. Una vez creada una asignación, su curso, materia, profesor, día, horas y comienzo son inmutables; se cierra asignando `valid_until` y se inserta otra asignación para preservar el historial.
 - **Attendance** (`attendance`): `id`, `schedule_entry_id`, `class_date`, `status` (`present`, `absent`, `late`), `arrived_at` opcional, `notes` opcional, `created_at` y `updated_at` (`timestamptz`). Relación N:1 con ScheduleEntry; restricción única sobre (`schedule_entry_id`, `class_date`). Un trigger valida que la fecha corresponda al día y a la vigencia de la asignación. `arrived_at` solo se admite con estado `late`; `updated_at` se refresca al modificar el registro.
 
 Los identificadores y relaciones usan claves foráneas restrictivas para no borrar datos históricos por cascada. Los índices cubren la selección del curso actual, materias y horarios por curso, la búsqueda mensual de asistencias y la exclusión de horarios solapados. Al cargar calendarios mensuales, el backend debe recuperar asistencias por rango de fechas mediante una consulta conjunta con asignaciones y materias (o una consulta por lote); no debe consultar cada clase individualmente para evitar N+1.
@@ -66,27 +67,28 @@ API REST versionada bajo `/api/v1`:
 | Método y ruta | Uso |
 |---|---|
 | `GET /api/v1/health` | Comprobar el estado del backend y la conexión PostgreSQL (implementada inicialmente) |
-| `GET /courses` | Listar cursos |
-| `POST /courses` | Crear curso |
-| `PATCH /courses/:courseId` | Editar datos o establecer como curso actual |
-| `GET /courses/:courseId/subjects` | Listar materias |
-| `POST /courses/:courseId/subjects` | Crear materia |
-| `PATCH /subjects/:subjectId` / `DELETE /subjects/:subjectId` | Modificar o retirar una materia sin romper el historial |
-| `GET /courses/:courseId/schedule` | Consultar horario vigente |
-| `POST /courses/:courseId/schedule` | Crear asignación horaria |
-| `PATCH /schedule/:entryId` | Cambiar asignación cerrando su vigencia y creando la revisión correspondiente |
-| `GET /courses/:courseId/month?year=YYYY&month=MM` | Devolver clases programadas del mes y su estado, incluyendo pendientes |
-| `PUT /schedule/:entryId/attendance/:date` | Crear o actualizar el estado de asistencia de una clase |
-| `DELETE /schedule/:entryId/attendance/:date` | Quitar un registro y volverlo a pendiente |
+| `GET /api/v1/courses` / `POST /api/v1/courses` | Listar y crear cursos |
+| `PATCH /api/v1/courses/:courseId` / `DELETE /api/v1/courses/:courseId` | Editar, marcar como actual o borrar un curso sin datos relacionados |
+| `GET /api/v1/courses/:courseId/subjects` / `POST /api/v1/courses/:courseId/subjects` | Listar y crear materias de un curso |
+| `PATCH /api/v1/subjects/:subjectId` / `DELETE /api/v1/subjects/:subjectId` | Modificar o retirar una materia sin romper el historial |
+| `GET /api/v1/teachers` / `POST /api/v1/teachers` | Listar y crear profesores |
+| `PATCH /api/v1/teachers/:teacherId` / `DELETE /api/v1/teachers/:teacherId` | Modificar o retirar un profesor sin romper el historial |
+| `GET /api/v1/courses/:courseId/schedule?date=YYYY-MM-DD` | Consultar las asignaciones del curso vigentes en una fecha |
+| `POST /api/v1/courses/:courseId/schedule` | Asignar materia, profesor, día y horas recurrentes a un curso |
+| `PATCH /api/v1/schedule/:entryId` | Cerrar la asignación en `validUntil` y crear su nueva versión, preservando el historial |
+| `DELETE /api/v1/schedule/:entryId` | Cerrar una asignación en la fecha `validUntil` indicada, preservando el historial |
+| `GET /api/v1/courses/:courseId/month?year=YYYY&month=MM` | Devolver clases programadas del mes y su estado, incluyendo pendientes |
+| `PUT /api/v1/schedule/:entryId/attendance/:date` | Crear o actualizar el estado de asistencia de una clase |
+| `DELETE /api/v1/schedule/:entryId/attendance/:date` | Quitar un registro y volverlo a pendiente |
 
 Socket.io emite `attendance:updated` después de una escritura válida, con el curso, la fecha y el identificador de la clase, para refrescar otras pestañas abiertas. La API REST es la fuente de verdad; la aplicación debe seguir funcionando si no hay conexión WebSocket. No hay eventos de escritura vía socket.
 
 ## Tareas Pendientes (ToDo)
 
-- **Backend:** Completar endpoints Express para cursos, materias, revisiones de horario, clases mensuales derivadas y CRUD de asistencia. La API Express mínima, pool PostgreSQL, comprobación de conexión y migración inicial ya existen. Añadir las validaciones de entrada, Socket.io para emitir `attendance:updated` tras guardar correctamente y pruebas Jest para las rutas y reglas de fechas.
-- **Frontend:** La aplicación inicial usa Vue/Vuetify y Pinia, consulta `GET /api/v1/health`, permite repetir la comprobación y comunica si falla la API o la base de datos. La pantalla incluye el esqueleto del calendario y placeholders para materias y horario, sin datos ficticios ni escritura de asistencias. Pendiente: conectar la selección de cursos, materias, horario recurrente, calendario derivado y edición de estados; mantener el estado de UI con Pinia cuando se integre la API y mostrar errores de datos.
+- **Backend:** Implementados CRUD de cursos, materias y profesores, creación/consulta y revisión temporal de horario semanal (incluyendo profesor), migración PostgreSQL 002 y pruebas Jest iniciales. Pendiente: clases mensuales derivadas y CRUD de asistencia; añadir Socket.io para emitir `attendance:updated` tras guardar una asistencia válida.
+- **Frontend:** La sección de Administración ya consume los endpoints REST para cursos, materias, profesores y horarios, con formularios, edición, estados vacíos y mensajes de error/éxito. El calendario mensual y las secciones de materias/horario aún no muestran datos del backend. Pendiente: calendario mensual derivado, CRUD de asistencias y conexión de la selección de curso al calendario.
 - **DevOps:** Existe un Docker Compose local único para frontend, backend y PostgreSQL, con imágenes multi-stage/ligeras, persistencia, healthchecks y migración inicial automática sobre un volumen nuevo. Pendiente: GitHub Actions para lint, pruebas y build, y documentación de despliegue seguro más allá del entorno local.
-- **QA:** Añadir pruebas Jest para reglas de fechas, cambios de horario y endpoints; añadir pruebas Vitest para navegación mensual, estados y formularios.
+- **QA:** Hay pruebas Jest para endpoints iniciales y pruebas Vitest para el calendario y la pantalla de administración. Pendiente: pruebas de integración con PostgreSQL, cambios de horario y asistencia.
 - **Documentación:** Completar README con instalación, uso, decisiones del modelo y procedimiento para respaldos de la base de datos.
 
 ## Criterios de Aceptación Iniciales
@@ -100,8 +102,8 @@ Socket.io emite `attendance:updated` después de una escritura válida, con el c
 
 ## Arranque del Backend
 
-Requiere Node.js 24 o posterior y PostgreSQL con la migración inicial aplicada. Configura `DATABASE_URL` para desarrollo local; Compose configura `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` y `PGPASSWORD`. El servidor no escucha peticiones si no puede conectar con PostgreSQL. En esta fase solo está disponible `GET /api/v1/health`.
+Requiere Node.js 24 o posterior y PostgreSQL con las migraciones `001_initial_schema.sql` y `002_teachers_and_schedule.sql` aplicadas. Configura `DATABASE_URL` para desarrollo local; Compose configura `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` y `PGPASSWORD`. El servidor no escucha peticiones si no puede conectar con PostgreSQL.
 
 ## Entorno Local con Docker Compose
 
-El único Compose actual, [`docker-compose.yml`](./docker-compose.yml), levanta tres contenedores sencillos: PostgreSQL (`database`), Express (`backend`) y el servidor de desarrollo Vite (`frontend`); no utiliza Nginx. Copia `.env.example` a `.env`, cambia `POSTGRES_PASSWORD` y ejecuta `docker compose up --build -d`. La interfaz queda disponible en `http://localhost:5173` y la API en `http://localhost:3000`; Vite reenvía las solicitudes `/api` al backend. La base de datos no publica puertos al anfitrión. La migración inicial se ejecuta al crear un volumen PostgreSQL vacío; `postgres_data` conserva los datos entre reinicios. Más adelante se añadirá por separado la configuración de producción.
+El único Compose actual, [`docker-compose.yml`](./docker-compose.yml), levanta tres contenedores sencillos: PostgreSQL (`database`), Express (`backend`) y el servidor de desarrollo Vite (`frontend`); no utiliza Nginx. Copia `.env.example` a `.env`, cambia `POSTGRES_PASSWORD` y ejecuta `docker compose up --build -d`. La interfaz queda disponible en `http://localhost:5173` y la API en `http://localhost:3000`; Vite reenvía las solicitudes `/api` al backend. La base de datos no publica puertos al anfitrión. Las migraciones 001 y 002 se ejecutan al crear un volumen PostgreSQL vacío; `postgres_data` conserva los datos entre reinicios. En una base de datos que ya tenga el esquema 001, aplica también `002_teachers_and_schedule.sql` antes de usar profesores y horarios. Más adelante se añadirá por separado la configuración de producción.

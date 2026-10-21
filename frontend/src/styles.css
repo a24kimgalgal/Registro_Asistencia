@@ -70,15 +70,6 @@ body {
   gap: 10px;
 }
 
-.course-selector.v-btn {
-  color: #52625a;
-  opacity: 1;
-}
-
-.course-config.v-btn--disabled {
-  opacity: 0.58;
-}
-
 .dashboard {
   width: min(100%, 1000px);
   margin: 0 auto;
@@ -466,7 +457,6 @@ a:focus-visible {
     gap: 6px;
   }
 
-  .course-selector.v-btn,
   .course-config.v-btn {
     font-size: 11px;
     letter-spacing: 0;
