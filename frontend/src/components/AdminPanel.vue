@@ -1,6 +1,14 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { apiRequest, jsonBody } from '../services/api.js';
+
+const props = defineProps({
+  selectedCourseId: {
+    type: String,
+    default: '',
+  },
+});
+const emit = defineEmits(['course-selected', 'courses-changed']);
 
 const tabs = [
   { id: 'courses', label: 'Cursos' },
@@ -21,7 +29,7 @@ const courses = ref([]);
 const subjects = ref([]);
 const teachers = ref([]);
 const schedule = ref([]);
-const selectedCourseId = ref('');
+const selectedCourseId = ref(props.selectedCourseId);
 const scheduleDate = ref(today());
 const busy = ref(false);
 const loading = ref(false);
@@ -31,10 +39,41 @@ const editingCourseId = ref(null);
 const editingSubjectId = ref(null);
 const editingTeacherId = ref(null);
 const editingScheduleId = ref(null);
+const canCreateSchedule = computed(() => selectedCourse.value?.endDate >= today());
 
 function today() {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function dateForCourse(course, date = today()) {
+  if (date < course.startDate) return course.startDate;
+  if (date > course.endDate) return course.endDate;
+  return date;
+}
+
+function scheduleStartDate(course) {
+  const currentDate = today();
+  return currentDate < course.startDate ? course.startDate : currentDate;
+}
+
+function nextDate(dateValue) {
+  const normalizedDate = String(dateValue).slice(0, 10);
+  const [year, month, day] = normalizedDate.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + 1));
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('No se pudo calcular la siguiente fecha del horario.');
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function nextValidScheduleDate(entry) {
+  const todayDate = today();
+  const latestDate = [entry.validFrom, entry.lastAttendanceDate, todayDate]
+    .filter(Boolean)
+    .map((date) => String(date).slice(0, 10))
+    .reduce((latest, date) => (date > latest ? date : latest));
+  return nextDate(latestDate);
 }
 
 function emptyCourse() {
@@ -56,8 +95,8 @@ function emptySchedule() {
     weekday: 1,
     startTime: '08:00',
     endTime: '09:00',
-    validFrom: scheduleDate.value || today(),
     validUntil: '',
+    lastAttendanceDate: null,
   };
 }
 
@@ -83,7 +122,9 @@ function setMessage(message) {
 
 function handleError(error) {
   successMessage.value = '';
-  errorMessage.value = error.message;
+  errorMessage.value = error.code === 'SCHEDULE_ENTRY_HAS_ATTENDANCE'
+    ? 'No se puede borrar esta asignación porque tiene asistencias. Puedes cerrarla para conservar el historial.'
+    : error.message;
 }
 
 async function runAction(action, success) {
@@ -119,7 +160,7 @@ async function loadCourseData() {
   }
 }
 
-async function loadData(preferredCourseId = selectedCourseId.value) {
+async function loadData(preferredCourseId = props.selectedCourseId || selectedCourseId.value) {
   loading.value = true;
   errorMessage.value = '';
   try {
@@ -136,13 +177,10 @@ async function loadData(preferredCourseId = selectedCourseId.value) {
     selectedCourseId.value = String(
       preferredCourse?.id ?? currentCourse?.id ?? courses.value[0]?.id ?? '',
     );
+    emit('course-selected', selectedCourseId.value);
     if (selectedCourse.value) {
-      const now = today();
-      if (now < selectedCourse.value.startDate || now > selectedCourse.value.endDate) {
-        scheduleDate.value = selectedCourse.value.startDate;
-      }
+      scheduleDate.value = dateForCourse(selectedCourse.value, scheduleDate.value);
     }
-    scheduleForm.validFrom = scheduleDate.value;
     await loadCourseData();
   } finally {
     loading.value = false;
@@ -150,11 +188,9 @@ async function loadData(preferredCourseId = selectedCourseId.value) {
 }
 
 async function changeCourse() {
+  emit('course-selected', selectedCourseId.value);
   if (selectedCourse.value) {
-    const now = today();
-    if (now < selectedCourse.value.startDate || now > selectedCourse.value.endDate) {
-      scheduleDate.value = selectedCourse.value.startDate;
-    }
+    scheduleDate.value = dateForCourse(selectedCourse.value);
   }
   resetSchedule();
   try {
@@ -194,6 +230,7 @@ async function saveCourse() {
     }
     resetCourse();
     await loadData(savedCourse.course.id);
+    emit('courses-changed', savedCourse.course.id);
   }, editingId ? 'Curso actualizado.' : 'Curso creado.');
 }
 
@@ -219,6 +256,7 @@ async function deleteCourse(course) {
     await apiRequest(`/courses/${course.id}`, { method: 'DELETE' });
     if (String(selectedCourseId.value) === String(course.id)) selectedCourseId.value = '';
     await loadData();
+    emit('courses-changed', selectedCourseId.value);
   }, 'Curso borrado.');
 }
 
@@ -260,6 +298,19 @@ async function changeSubjectStatus(subject) {
     });
     await loadCourseData();
   }, isActive ? 'Materia reactivada.' : 'Materia desactivada.');
+}
+
+async function removeSubject(subject) {
+  if (!window.confirm(
+    `¿Eliminar ${subject.name}? Si ya se usó en un horario, se desactivará para conservar el historial.`,
+  )) return;
+  await runAction(async () => {
+    const result = await apiRequest(`/subjects/${subject.id}`, { method: 'DELETE' });
+    await loadCourseData();
+    setMessage(result.action === 'deleted'
+      ? 'Materia eliminada.'
+      : 'Materia desactivada para conservar el historial.');
+  });
 }
 
 async function saveTeacher() {
@@ -306,7 +357,7 @@ async function changeTeacherStatus(teacher) {
 
 async function saveSchedule() {
   const editingId = editingScheduleId.value;
-  const { validUntil, ...scheduleFields } = scheduleForm;
+  const { validUntil, lastAttendanceDate, ...scheduleFields } = scheduleForm;
   await runAction(async () => {
     if (editingId) {
       scheduleDate.value = validUntil;
@@ -328,12 +379,13 @@ async function saveSchedule() {
           subjectId: Number(scheduleFields.subjectId),
           teacherId: scheduleFields.teacherId ? Number(scheduleFields.teacherId) : null,
           weekday: Number(scheduleFields.weekday),
+          validFrom: scheduleStartDate(selectedCourse.value),
         }),
       });
     }
     resetSchedule();
     await loadCourseData();
-  }, editingId ? 'Horario actualizado desde la fecha indicada.' : 'Clase añadida al horario.');
+  }, editingId ? 'Horario actualizado; el historial se conserva.' : 'Clase añadida al horario.');
 }
 
 function editSchedule(entry) {
@@ -344,8 +396,8 @@ function editSchedule(entry) {
     weekday: entry.weekday,
     startTime: entry.startTime.slice(0, 5),
     endTime: entry.endTime.slice(0, 5),
-    validFrom: entry.validFrom,
-    validUntil: '',
+    validUntil: nextValidScheduleDate(entry),
+    lastAttendanceDate: entry.lastAttendanceDate,
   });
 }
 
@@ -355,18 +407,24 @@ function resetSchedule() {
 }
 
 async function closeSchedule(entry) {
-  const validUntil = window.prompt(
-    'Fecha desde la que termina esta asignación (YYYY-MM-DD):',
-    scheduleDate.value,
-  );
-  if (!validUntil) return;
+  const validUntil = nextValidScheduleDate(entry);
   await runAction(async () => {
     await apiRequest(`/schedule/${entry.id}`, {
       method: 'DELETE',
       body: jsonBody({ validUntil }),
     });
     await loadCourseData();
-  }, 'Asignación cerrada; el historial se conserva.');
+  }, `Horario cerrado desde ${validUntil}; el historial se conserva.`);
+}
+
+async function deleteSchedule(entry) {
+  if (!window.confirm(
+    `¿Borrar definitivamente ${entry.subjectName}? Solo se puede borrar si no tiene asistencias.`,
+  )) return;
+  await runAction(async () => {
+    await apiRequest(`/schedule/${entry.id}/permanent`, { method: 'DELETE' });
+    await loadCourseData();
+  }, 'Asignación borrada.');
 }
 
 function weekdayName(value) {
@@ -374,6 +432,17 @@ function weekdayName(value) {
 }
 
 onMounted(() => loadData().catch(handleError));
+
+watch(() => props.selectedCourseId, (courseId) => {
+  if (courseId && String(courseId) !== String(selectedCourseId.value)) {
+    selectedCourseId.value = String(courseId);
+    if (selectedCourse.value) {
+      scheduleDate.value = dateForCourse(selectedCourse.value);
+      resetSchedule();
+    }
+    loadCourseData().catch(handleError);
+  }
+});
 </script>
 
 <template>
@@ -459,6 +528,7 @@ onMounted(() => loadData().catch(handleError));
       </form>
       <div v-if="selectedCourse" class="admin-list">
         <h3>Materias de {{ selectedCourse.name }} <span>{{ subjects.length }}</span></h3>
+        <p class="admin-hint">Pulsa Eliminar: si la materia no se ha usado, se borra; si ya tiene horario, se desactiva para conservar el historial.</p>
         <p v-if="!subjects.length" class="admin-empty">Este curso todavía no tiene materias.</p>
         <article v-for="subject in subjects" :key="subject.id" class="admin-row">
           <div class="admin-row-title">
@@ -467,7 +537,17 @@ onMounted(() => loadData().catch(handleError));
           </div>
           <div class="admin-row-actions">
             <button class="admin-text-button" type="button" @click="editSubject(subject)">Editar</button>
-            <button class="admin-text-button" type="button" @click="changeSubjectStatus(subject)">{{ subject.isActive ? 'Desactivar' : 'Reactivar' }}</button>
+            <button
+              v-if="subject.isActive"
+              class="admin-text-button admin-text-button--danger"
+              type="button"
+              @click="removeSubject(subject)"
+            >
+              Eliminar
+            </button>
+            <button v-else class="admin-text-button" type="button" @click="changeSubjectStatus(subject)">
+              Reactivar
+            </button>
           </div>
         </article>
       </div>
@@ -509,7 +589,12 @@ onMounted(() => loadData().catch(handleError));
         </label>
         <form class="admin-form" @submit.prevent="saveSchedule">
           <h3>{{ editingScheduleId ? 'Cambiar asignación' : 'Añadir clase semanal' }}</h3>
-          <p class="admin-hint">Si modificas una clase, indica la fecha desde la que se aplica el cambio. La asignación anterior se conserva en el historial.</p>
+          <p v-if="editingScheduleId" class="admin-hint">
+            El cambio se aplicará automáticamente desde el día siguiente a hoy o a la última asistencia. La asignación anterior se conserva.
+          </p>
+          <p v-else class="admin-hint">
+            La clase se añadirá desde hoy o desde el inicio del curso, si todavía no ha comenzado. No hace falta introducir la fecha.
+          </p>
           <div class="admin-form-grid">
             <label>Materia
               <select v-model="scheduleForm.subjectId" required>
@@ -530,14 +615,21 @@ onMounted(() => loadData().catch(handleError));
             </label>
             <label>Empieza<input v-model="scheduleForm.startTime" type="time" required></label>
             <label>Termina<input v-model="scheduleForm.endTime" type="time" required></label>
-            <label v-if="editingScheduleId">Aplicar cambio desde<input v-model="scheduleForm.validUntil" type="date" :min="scheduleForm.validFrom" required></label>
-            <label v-else>Vigente desde<input v-model="scheduleForm.validFrom" type="date" required></label>
           </div>
           <div class="admin-form-actions">
-            <button class="admin-button" type="submit" :disabled="busy || !activeSubjects.length">{{ editingScheduleId ? 'Guardar nueva versión' : 'Añadir al horario' }}</button>
+            <button
+              class="admin-button"
+              type="submit"
+              :disabled="busy || !activeSubjects.length || (!editingScheduleId && !canCreateSchedule)"
+            >
+              {{ editingScheduleId ? 'Guardar nueva versión' : 'Añadir al horario' }}
+            </button>
             <button v-if="editingScheduleId" class="admin-button admin-button--secondary" type="button" @click="resetSchedule">Cancelar</button>
           </div>
           <p v-if="!activeSubjects.length" class="admin-hint">Crea o activa una materia antes de añadir clases al horario.</p>
+          <p v-if="!canCreateSchedule && !editingScheduleId" class="admin-hint">
+            El curso ya ha terminado; no se pueden añadir nuevas clases.
+          </p>
         </form>
         <div class="admin-list">
           <h3>Horario de {{ selectedCourse.name }} <span>{{ schedule.length }} clases</span></h3>
@@ -549,7 +641,15 @@ onMounted(() => loadData().catch(handleError));
             </div>
             <div class="admin-row-actions">
               <button class="admin-text-button" type="button" @click="editSchedule(entry)">Cambiar</button>
-              <button class="admin-text-button admin-text-button--danger" type="button" @click="closeSchedule(entry)">Cerrar</button>
+              <button class="admin-text-button" type="button" @click="closeSchedule(entry)">Cerrar horario</button>
+              <button
+                class="admin-text-button admin-text-button--danger"
+                type="button"
+                :disabled="busy"
+                @click="deleteSchedule(entry)"
+              >
+                Borrar
+              </button>
             </div>
           </article>
         </div>

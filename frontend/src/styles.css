@@ -24,7 +24,6 @@ body {
 
 .top-bar,
 .brand,
-.course-actions,
 .month-toolbar,
 .month-controls,
 .section-heading,
@@ -65,15 +64,34 @@ body {
   font-weight: 400;
 }
 
-.course-actions {
-  justify-content: flex-end;
-  gap: 10px;
+.course-picker {
+  display: flex;
+  max-width: 420px;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 18px;
+  color: #52625a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.course-picker select,
+.attendance-form input,
+.attendance-form select {
+  min-height: 40px;
+  border: 1px solid #dce4dc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #25362f;
+  font: inherit;
+  font-size: 13px;
 }
 
 .dashboard {
   width: min(100%, 1000px);
   margin: 0 auto;
-  padding: 42px 0 52px;
+  padding: 30px 0 42px;
 }
 
 .eyebrow {
@@ -88,14 +106,14 @@ body {
   margin: 0;
   color: #25362f;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(32px, 5vw, 46px);
+  font-size: clamp(30px, 4vw, 38px);
   font-weight: 400;
   letter-spacing: -0.045em;
   line-height: 1.12;
 }
 
 .welcome-copy {
-  margin: 12px 0 27px;
+  margin: 10px 0 20px;
   color: #68766e;
   font-size: 15px;
   line-height: 1.7;
@@ -264,6 +282,43 @@ body {
   font-size: 13px;
 }
 
+.calendar-day-button {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.calendar-day-button--selected {
+  outline: 2px solid #385e52;
+  outline-offset: 1px;
+}
+
+.calendar-day-button:focus-visible {
+  outline: 3px solid #9bc2ae;
+  outline-offset: 2px;
+}
+
+.calendar-day-count {
+  color: #52625a;
+  font-size: 10px;
+}
+
+.calendar-day-statuses {
+  display: flex;
+  gap: 3px;
+}
+
 .calendar-day:last-child {
   border-right: 0;
 }
@@ -310,6 +365,262 @@ body {
   color: #68766e;
   font-size: 13px;
   line-height: 1.65;
+}
+
+.data-feedback {
+  margin: 10px 0;
+  color: #52625a;
+  font-size: 12px;
+}
+
+.data-feedback--error {
+  border-radius: 9px;
+  padding: 11px 14px;
+  background: #fff0ed;
+  color: #a24e40;
+}
+
+.day-classes {
+  margin-top: 18px;
+}
+
+.day-classes .section-heading h3 {
+  margin: 0;
+  color: #2c3d35;
+  font-size: 14px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.selected-day-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.day-class-card,
+.subject-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #e5eae4;
+  border-radius: 12px;
+  margin-top: 9px;
+  padding: 13px 15px;
+  background: #fff;
+}
+
+.day-class-info,
+.subject-card > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.day-class-info strong,
+.subject-card strong {
+  color: #34483e;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.day-class-info > span,
+.subject-card > div > span,
+.weekly-entry small,
+.subject-class-count {
+  color: #78857d;
+  font-size: 11px;
+}
+
+.attendance-status {
+  font-weight: 650;
+}
+
+.attendance-status--present {
+  color: #438264 !important;
+}
+
+.attendance-status--absent {
+  color: #bd6357 !important;
+}
+
+.attendance-status--late {
+  color: #b58b3d !important;
+}
+
+.attendance-status--pending {
+  color: #71879b !important;
+}
+
+.day-class-actions,
+.attendance-form .admin-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-attendance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.quick-attendance-actions .admin-button,
+.day-class-actions .admin-button,
+.attendance-form .admin-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #385e52;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.quick-attendance-actions .admin-button--secondary,
+.day-class-actions .admin-button--secondary,
+.attendance-form .admin-button--secondary {
+  border: 1px solid #dce4dc;
+  background: #fff;
+  color: #52625a;
+}
+
+.quick-attendance-actions .admin-button.attendance-option--selected--present {
+  border: 1px solid #438264;
+  background: #438264;
+  color: #fff;
+}
+
+.quick-attendance-actions .admin-button.attendance-option--selected--absent {
+  border: 1px solid #bd6357;
+  background: #bd6357;
+  color: #fff;
+}
+
+.quick-attendance-actions .admin-button.attendance-option--selected--late {
+  border: 1px solid #b58b3d;
+  background: #b58b3d;
+  color: #fff;
+}
+
+.quick-attendance-actions .admin-button:disabled,
+.day-class-actions .admin-button:disabled,
+.attendance-form .admin-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.quick-attendance-actions .admin-button[class*="attendance-option--selected"]:disabled {
+  opacity: 1;
+}
+
+.future-date-note {
+  border-left: 3px solid #b58b3d;
+  margin: 10px 0;
+  padding: 7px 10px;
+  color: #735b2d;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.attendance-form {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid #edf0ec;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.attendance-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #52625a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.attendance-form .attendance-notes {
+  grid-column: span 2;
+}
+
+.attendance-form .admin-form-actions {
+  grid-column: 1 / -1;
+}
+
+.weekly-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weekly-day {
+  min-height: 160px;
+  border: 1px solid #e5eae4;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.weekly-day h3 {
+  margin: 0 0 10px;
+  color: #53645a;
+  font-size: 12px;
+}
+
+.weekly-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 3px solid #385e52;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: #edf2ec;
+}
+
+.weekly-entry strong,
+.weekly-entry span {
+  color: #34483e;
+  font-size: 11px;
+}
+
+.weekly-entry small {
+  overflow-wrap: anywhere;
+}
+
+.weekly-empty {
+  color: #9aa49d;
+  font-size: 11px;
+}
+
+.subject-list {
+  display: grid;
+  gap: 8px;
+}
+
+.subject-card {
+  justify-content: flex-start;
+}
+
+.subject-color {
+  width: 8px;
+  min-height: 34px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+}
+
+.subject-class-count {
+  margin-left: auto;
+  text-align: right;
 }
 
 .legend {
@@ -449,17 +760,18 @@ a:focus-visible {
     padding: 18px 20px 16px;
   }
 
+  .primary-nav {
+    flex-wrap: wrap;
+  }
+
+  .primary-nav .v-btn {
+    min-width: 0;
+    flex: 1 1 calc(50% - 6px);
+    border-radius: 10px;
+  }
+
   .dashboard {
     padding: 34px 0 40px;
-  }
-
-  .course-actions {
-    gap: 6px;
-  }
-
-  .course-config.v-btn {
-    font-size: 11px;
-    letter-spacing: 0;
   }
 
   .month-toolbar {
@@ -497,6 +809,24 @@ a:focus-visible {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .weekly-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .day-class-card {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .attendance-form {
+    grid-template-columns: 1fr;
+  }
+
+  .attendance-form .attendance-notes,
+  .attendance-form .admin-form-actions {
+    grid-column: 1;
+  }
 }
 
 @media (max-width: 430px) {
@@ -505,13 +835,8 @@ a:focus-visible {
     flex-direction: column;
   }
 
-  .course-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
   .welcome h1 {
-    font-size: 34px;
+    font-size: 30px;
   }
 
   .control-label {
@@ -521,5 +846,10 @@ a:focus-visible {
   .calendar-day {
     min-height: 48px;
     padding: 7px 5px;
+  }
+
+  .selected-day-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }

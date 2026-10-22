@@ -1,6 +1,8 @@
 import express from 'express';
 import { createCoursesRouter } from './routes/courses.routes.js';
 import { createHealthRouter } from './routes/health.routes.js';
+import { createAttendanceRouter } from './routes/attendance.routes.js';
+import { createMonthlyClassesRouter } from './routes/monthly-classes.routes.js';
 import { createScheduleRouter } from './routes/schedule.routes.js';
 import { createSubjectsRouter } from './routes/subjects.routes.js';
 import { createTeachersRouter } from './routes/teachers.routes.js';
@@ -12,12 +14,14 @@ export function createApp({ database, logger = console }) {
   app.use(express.json({ limit: '100kb' }));
 
   app.use('/api/v1/health', createHealthRouter({ database, logger }));
+  app.use('/api/v1/courses', createMonthlyClassesRouter({ database }));
   app.use('/api/v1/courses', createCoursesRouter({ database }));
   app.use('/api/v1/courses/:courseId/subjects', createSubjectsRouter({ database }));
   app.use('/api/v1/subjects', createSubjectsRouter({ database, standalone: true }));
   app.use('/api/v1/teachers', createTeachersRouter({ database }));
   app.use('/api/v1/courses/:courseId/schedule', createScheduleRouter({ database }));
   app.use('/api/v1/schedule', createScheduleRouter({ database, standalone: true }));
+  app.use('/api/v1/schedule', createAttendanceRouter({ database }));
 
   app.use((req, res) => {
     res.status(404).json({

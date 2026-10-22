@@ -15,7 +15,7 @@ npm test
 
 Desde la raíz del proyecto, copia `.env.example` a `.env` y ajusta `DATABASE_URL`. Arranca el backend con `npm --prefix backend start`, o utiliza `npm --prefix backend run dev` para el modo de desarrollo con reinicio al cambiar archivos. El servidor comprueba la conexión durante el arranque y no inicia si la base de datos no está disponible.
 
-La API incluye comprobación de salud, cursos, materias, profesores y horario semanal. Los horarios se repiten de lunes a viernes; cada tramo guarda el curso, la materia, el profesor (opcional), el día y las horas. Al cambiar o retirar una asignación se cierra su vigencia para conservar los registros históricos.
+La API incluye comprobación de salud, cursos, materias, profesores, horario semanal y asistencias. Los horarios se repiten de lunes a viernes; cada tramo guarda el curso, la materia, el profesor (opcional), el día y las horas. Al cambiar o retirar una asignación se cierra su vigencia para conservar los registros históricos. El calendario mensual deriva las clases de esas asignaciones; las clases todavía no registradas se devuelven como `pending`, no como faltas.
 
 Rutas principales:
 
@@ -24,19 +24,25 @@ Rutas principales:
 | `GET`, `POST` | `/api/v1/courses` | Listar y crear cursos |
 | `PATCH`, `DELETE` | `/api/v1/courses/:courseId` | Editar o borrar cursos sin datos relacionados |
 | `GET`, `POST` | `/api/v1/courses/:courseId/subjects` | Listar y crear materias |
-| `PATCH`, `DELETE` | `/api/v1/subjects/:subjectId` | Editar o retirar materias |
+| `PATCH`, `DELETE` | `/api/v1/subjects/:subjectId` | Editar; eliminar si no se ha usado o desactivar para conservar historial |
 | `GET`, `POST` | `/api/v1/teachers` | Listar y crear profesores |
 | `PATCH`, `DELETE` | `/api/v1/teachers/:teacherId` | Editar o retirar profesores |
 | `GET`, `POST` | `/api/v1/courses/:courseId/schedule` | Consultar y asignar tramos del horario semanal |
-| `PATCH`, `DELETE` | `/api/v1/schedule/:entryId` | Revisar o cerrar un tramo conservando su historial |
+| `PATCH` | `/api/v1/schedule/:entryId` | Revisar un tramo creando una nueva versión y conservando el historial |
+| `DELETE` | `/api/v1/schedule/:entryId` | Cerrar un tramo en `validUntil`, conservando el historial |
+| `DELETE` | `/api/v1/schedule/:entryId/permanent` | Borrar definitivamente un tramo solo si no tiene asistencias |
+| `GET` | `/api/v1/courses/:courseId/month?year=YYYY&month=MM` | Consultar clases del mes derivadas del horario, incluidas las pendientes |
+| `PUT`, `DELETE` | `/api/v1/schedule/:entryId/attendance/:date` | Crear/actualizar asistencia o quitar el registro |
 
-Para crear un tramo, envía JSON como `{"subjectId": 3, "teacherId": 8, "weekday": 1, "startTime": "08:00", "endTime": "09:00", "validFrom": "2026-09-01"}` a `/api/v1/courses/2/schedule`. Los días usan ISO: lunes `1` y viernes `5`. El profesor es opcional. El endpoint de consulta admite `?date=YYYY-MM-DD` y solo devuelve tramos vigentes en esa fecha.
+Para crear un tramo, envía JSON como `{"subjectId": 3, "teacherId": 8, "weekday": 1, "startTime": "08:00", "endTime": "09:00", "validFrom": "2026-09-01"}` a `/api/v1/courses/2/schedule`. Los días usan ISO: lunes `1` y viernes `5`. El profesor es opcional. `validFrom` es obligatorio para la API; la interfaz puede calcularlo automáticamente sin pedir esa fecha a la persona usuaria. El endpoint de consulta admite `?date=YYYY-MM-DD`, solo devuelve tramos dentro del período del curso y vigentes en esa fecha.
 
-El CRUD de asistencias y el calendario mensual derivado todavía están pendientes.
+Para borrar definitivamente un tramo creado por error, usa `DELETE /api/v1/schedule/:entryId/permanent`. Solo se borra si no tiene registros de asistencia; si los tiene, la API responde `409 SCHEDULE_ENTRY_HAS_ATTENDANCE` sin eliminar datos. Para terminar un tramo y conservar su historial, usa `DELETE /api/v1/schedule/:entryId` con `{"validUntil":"YYYY-MM-DD"}`. Son operaciones distintas.
+
+El calendario mensual devuelve cada clase con la fecha, materia, profesor, horas, estado y campos de asistencia. Los estados posibles son `present`, `absent` y `late`; sin registro, el estado devuelto es `pending`. Para guardar o corregir un registro, envía por ejemplo `{"status":"late","arrivedAt":"09:12","notes":"Llegada tarde"}` con `PUT` a `/api/v1/schedule/12/attendance/2026-09-07`. `arrivedAt` y `notes` son opcionales; la hora de llegada solo se admite para `late`. `DELETE` sobre esa misma ruta elimina el registro y deja la clase pendiente. La base de datos valida que la fecha corresponda al día de la asignación y a su período de vigencia.
 
 ## Administración desde el frontend
 
-Abre la sección **Administración** desde la navegación principal o pulsa **Administrar curso**. Allí puedes crear, editar o borrar cursos (el borrado falla si tienen datos relacionados), crear y editar materias/profesores, y desactivarlos o reactivarlos sin perder su historial. En **Horario semanal**, primero selecciona un curso y configura materia, profesor opcional, día, hora y fecha de inicio. Los cambios y cierres de asignaciones indican una fecha efectiva para conservar las versiones anteriores del horario. La lista muestra las asignaciones vigentes en la fecha seleccionada.
+Abre la sección **Administración** desde la navegación principal o pulsa **Administrar curso**. Allí puedes crear, editar o borrar cursos (el borrado falla si tienen datos relacionados), crear y editar materias/profesores y retirar los que ya no uses. Una materia que nunca se asignó a un horario se elimina; si ya se usó, se desactiva para preservar el historial y puede reactivarse. En **Horario semanal**, primero selecciona un curso y configura materia, profesor opcional, día, hora y fecha de inicio. Al cambiar o cerrar una asignación, la fecha debe ser posterior a las asistencias existentes para conservar las clases ya registradas.
 
 ## Frontend inicial
 
@@ -49,7 +55,7 @@ npm run build
 npm run dev
 ```
 
-La pantalla inicial incluye navegación mensual de lunes a viernes, una ventana visual de 12 meses, resumen y leyenda de asistencia, y estados vacíos para cursos todavía no configurados. No inventa cursos, materias, clases ni asistencias. La interfaz todavía no está conectada a los endpoints de cursos, materias y horario; los límites de navegación son visuales.
+La pantalla permite seleccionar un curso y consultar sus clases mensuales. En **Horario**, elige la fecha y marca cada clase (cada hora) por separado como presente, falta o retardo; puedes cambiar el estado o dejarla pendiente. Así, en un mismo día cada hora puede tener un estado distinto. **Calendario** muestra los estados de todas las clases por fecha y permite añadir la hora de llegada o notas a un retardo. Las clases sin registro aparecen como pendientes. **Materias** muestra el catálogo del curso. Los horarios solo muestran tramos creados desde Administración; la aplicación no inventa materias ni horas.
 
 En desarrollo, Vite reenvía las rutas `/api` a `http://localhost:3000`. Inicia primero el backend para que se muestre el estado de la conexión. Si la API está en otra dirección, configura `BACKEND_URL` antes de iniciar Vite. `VITE_API_URL` cambia la ruta base que utiliza el frontend; si apuntas a otro origen, ese servidor debe permitir solicitudes desde el navegador.
 

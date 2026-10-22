@@ -3,6 +3,7 @@ import {
   isNonEmptyString,
   isOptionalString,
   isPositiveId,
+  withTransaction,
 } from './route-helpers.js';
 
 export function createSubjectsRouter({ database, standalone = false }) {
@@ -80,19 +81,41 @@ export function createSubjectsRouter({ database, standalone = false }) {
   });
 
   router.delete('/:subjectId', async (req, res) => {
-    if (!isPositiveId(req.params.subjectId)) {
+    const { subjectId } = req.params;
+    if (!isPositiveId(subjectId)) {
       return res.status(400).json({ error: { code: 'INVALID_ID', message: 'subjectId must be a positive integer.' } });
     }
-    const result = await database.query(
-      `UPDATE subjects SET is_active = false
-        WHERE id = $1 AND is_active = true
-        RETURNING id`,
-      [req.params.subjectId],
-    );
-    if (!result.rowCount) {
+
+    const result = await withTransaction(database, async (client) => {
+      const subjectResult = await client.query(
+        `SELECT id, is_active AS "isActive",
+                EXISTS (
+                  SELECT 1 FROM schedule_entries WHERE subject_id = subjects.id
+                ) AS "hasSchedule"
+           FROM subjects
+          WHERE id = $1
+          FOR UPDATE`,
+        [subjectId],
+      );
+      const subject = subjectResult.rows[0];
+      if (!subject || !subject.isActive) return null;
+
+      if (subject.hasSchedule) {
+        await client.query(
+          'UPDATE subjects SET is_active = false WHERE id = $1',
+          [subjectId],
+        );
+        return { action: 'deactivated' };
+      }
+
+      await client.query('DELETE FROM subjects WHERE id = $1', [subjectId]);
+      return { action: 'deleted' };
+    });
+
+    if (!result) {
       return res.status(404).json({ error: { code: 'SUBJECT_NOT_FOUND', message: 'Active subject not found.' } });
     }
-    return res.status(204).send();
+    return res.json({ action: result.action });
   });
 
   return router;

@@ -13,7 +13,9 @@ export async function apiRequest(path, options = {}) {
 
   const result = await response.json();
   if (!response.ok) {
-    throw new Error(result.error?.message || 'No se pudo completar la operación.');
+    const error = new Error(result.error?.message || 'No se pudo completar la operación.');
+    error.code = result.error?.code;
+    throw error;
   }
   return result;
 }

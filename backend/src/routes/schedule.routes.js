@@ -13,7 +13,10 @@ const scheduleSelect = `
          entry.teacher_id AS "teacherId", teacher.name AS "teacherName",
          entry.weekday, entry.start_time AS "startTime",
          entry.end_time AS "endTime", entry.valid_from AS "validFrom",
-         entry.valid_until AS "validUntil"
+         entry.valid_until AS "validUntil",
+         (SELECT max(attendance.class_date)
+            FROM attendance
+           WHERE attendance.schedule_entry_id = entry.id) AS "lastAttendanceDate"
     FROM schedule_entries AS entry
     JOIN subjects AS subject ON subject.id = entry.subject_id
     LEFT JOIN teachers AS teacher ON teacher.id = entry.teacher_id
@@ -72,7 +75,10 @@ export function createScheduleRouter({ database, standalone = false }) {
 
     const result = await database.query(
       `${scheduleSelect}
+        JOIN courses AS course ON course.id = entry.course_id
         WHERE entry.course_id = $1
+          AND course.start_date <= $2::date
+          AND course.end_date >= $2::date
           AND entry.valid_from <= $2
           AND (entry.valid_until IS NULL OR entry.valid_until > $2)
         ORDER BY entry.weekday, entry.start_time, entry.id`,
@@ -217,6 +223,51 @@ export function createScheduleRouter({ database, standalone = false }) {
     );
     if (!result.rowCount) {
       return res.status(404).json({ error: { code: 'SCHEDULE_ENTRY_NOT_FOUND', message: 'An active schedule entry with an earlier start date was not found.' } });
+    }
+    return res.status(204).send();
+  });
+
+  router.delete('/:entryId/permanent', async (req, res) => {
+    const { entryId } = req.params;
+    if (!isPositiveId(entryId)) {
+      return res.status(400).json({
+        error: { code: 'INVALID_ID', message: 'entryId must be a positive integer.' },
+      });
+    }
+
+    const result = await withTransaction(database, async (client) => {
+      const entryResult = await client.query(
+        'SELECT id FROM schedule_entries WHERE id = $1 FOR UPDATE',
+        [entryId],
+      );
+      if (!entryResult.rowCount) return null;
+
+      const attendanceResult = await client.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM attendance WHERE schedule_entry_id = $1
+         ) AS "hasAttendance"`,
+        [entryId],
+      );
+      if (attendanceResult.rows[0].hasAttendance) {
+        return { hasAttendance: true };
+      }
+
+      await client.query('DELETE FROM schedule_entries WHERE id = $1', [entryId]);
+      return { deleted: true };
+    });
+
+    if (!result) {
+      return res.status(404).json({
+        error: { code: 'SCHEDULE_ENTRY_NOT_FOUND', message: 'Schedule entry not found.' },
+      });
+    }
+    if (result.hasAttendance) {
+      return res.status(409).json({
+        error: {
+          code: 'SCHEDULE_ENTRY_HAS_ATTENDANCE',
+          message: 'This schedule entry has attendance records and cannot be deleted.',
+        },
+      });
     }
     return res.status(204).send();
   });
