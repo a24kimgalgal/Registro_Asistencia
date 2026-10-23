@@ -54,7 +54,6 @@ describe('administration panel', () => {
 
   it('shows the course and teacher selectors for weekly scheduling', async () => {
     const today = new Date();
-    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     fetch.mockImplementation(async (url, options = {}) => {
       if (url.endsWith('/courses')) {
         return response({
@@ -116,8 +115,8 @@ describe('administration panel', () => {
       weekday: 1,
       startTime: '08:00',
       endTime: '09:00',
-      validFrom: todayKey,
     });
+    expect(wrapper.text()).toContain('desde el inicio del curso');
     expect(wrapper.text()).not.toContain('Vigente desde');
     expect(wrapper.text()).toContain('Lunes · 08:00–09:00');
     expect(wrapper.text()).toContain('Programación · Carles Narvaez');
@@ -125,7 +124,7 @@ describe('administration panel', () => {
     wrapper.unmount();
   });
 
-  it('uses the course start date for a schedule created before a future course', async () => {
+  it('leaves schedule validity to the backend for a future course', async () => {
     fetch.mockImplementation(async (url, options = {}) => {
       if (url.endsWith('/courses')) {
         return response({
@@ -159,7 +158,7 @@ describe('administration panel', () => {
     const scheduleRequest = fetch.mock.calls.find(
       ([url, options]) => url === '/api/v1/courses/2/schedule' && options.method === 'POST',
     );
-    expect(JSON.parse(scheduleRequest[1].body).validFrom).toBe('2099-09-01');
+    expect(JSON.parse(scheduleRequest[1].body)).not.toHaveProperty('validFrom');
     wrapper.unmount();
   });
 

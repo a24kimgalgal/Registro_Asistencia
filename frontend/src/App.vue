@@ -43,8 +43,12 @@ const monthTitle = computed(() => new Intl.DateTimeFormat('es-ES', {
 const selectedCourse = computed(() => courses.value.find(
   (course) => String(course.id) === String(selectedCourseId.value),
 ));
-const earliestMonth = computed(() => addMonths(currentMonth, -6));
-const latestMonth = computed(() => addMonths(currentMonth, 5));
+const earliestMonth = computed(() => selectedCourse.value
+  ? startOfMonth(new Date(`${selectedCourse.value.startDate}T00:00:00`))
+  : addMonths(currentMonth, -6));
+const latestMonth = computed(() => selectedCourse.value
+  ? startOfMonth(new Date(`${selectedCourse.value.endDate}T00:00:00`))
+  : addMonths(currentMonth, 5));
 const canGoToPreviousMonth = computed(() => displayedMonth.value > earliestMonth.value);
 const canGoToNextMonth = computed(() => displayedMonth.value < latestMonth.value);
 const isFutureDate = (date) => date > dateKey(new Date());
@@ -120,7 +124,9 @@ function changeMonth(amount) {
   const nextMonth = addMonths(displayedMonth.value, amount);
   if (nextMonth < earliestMonth.value || nextMonth > latestMonth.value) return;
   displayedMonth.value = nextMonth;
-  selectedDate.value = dateKey(nextMonth);
+  const isCourseStartMonth = selectedCourse.value
+    && dateKey(nextMonth).slice(0, 7) === selectedCourse.value.startDate.slice(0, 7);
+  selectedDate.value = isCourseStartMonth ? selectedCourse.value.startDate : dateKey(nextMonth);
   loadCourseData();
 }
 
@@ -246,6 +252,10 @@ function navigateTo(section) {
 }
 
 function selectDate(date) {
+  if (
+    selectedCourse.value
+    && (date < selectedCourse.value.startDate || date > selectedCourse.value.endDate)
+  ) return;
   selectedDate.value = date;
   selectedClass.value = null;
   if (date.slice(0, 7) !== dateKey(displayedMonth.value).slice(0, 7)) {
@@ -510,6 +520,7 @@ onMounted(() => {
                       class="calendar-day-button"
                       :class="{ 'calendar-day-button--selected': selectedDate === day.key }"
                       type="button"
+                      :disabled="selectedCourse && (day.key < selectedCourse.startDate || day.key > selectedCourse.endDate)"
                       :aria-pressed="selectedDate === day.key"
                       @click="selectDate(day.key)"
                     >
@@ -673,6 +684,8 @@ onMounted(() => {
               <input
                 v-model="selectedDate"
                 type="date"
+                :min="selectedCourse.startDate"
+                :max="selectedCourse.endDate"
                 @change="selectDate(selectedDate)"
               >
             </label>

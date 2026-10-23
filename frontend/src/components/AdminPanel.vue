@@ -52,11 +52,6 @@ function dateForCourse(course, date = today()) {
   return date;
 }
 
-function scheduleStartDate(course) {
-  const currentDate = today();
-  return currentDate < course.startDate ? course.startDate : currentDate;
-}
-
 function nextDate(dateValue) {
   const normalizedDate = String(dateValue).slice(0, 10);
   const [year, month, day] = normalizedDate.split('-').map(Number);
@@ -379,7 +374,6 @@ async function saveSchedule() {
           subjectId: Number(scheduleFields.subjectId),
           teacherId: scheduleFields.teacherId ? Number(scheduleFields.teacherId) : null,
           weekday: Number(scheduleFields.weekday),
-          validFrom: scheduleStartDate(selectedCourse.value),
         }),
       });
     }
@@ -593,7 +587,7 @@ watch(() => props.selectedCourseId, (courseId) => {
             El cambio se aplicará automáticamente desde el día siguiente a hoy o a la última asistencia. La asignación anterior se conserva.
           </p>
           <p v-else class="admin-hint">
-            La clase se añadirá desde hoy o desde el inicio del curso, si todavía no ha comenzado. No hace falta introducir la fecha.
+            La clase se añadirá desde el inicio del curso para poder completar también asistencias pasadas.
           </p>
           <div class="admin-form-grid">
             <label>Materia

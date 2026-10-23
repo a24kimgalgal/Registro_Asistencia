@@ -15,6 +15,43 @@ function validAttendance({ status, arrivedAt, notes }) {
     && (!(arrivedAt && status !== 'late'));
 }
 
+function futureAttendanceDate(date) {
+  return date > new Date().toISOString().slice(0, 10);
+}
+
+async function findScheduleForDate(database, entryId, date) {
+  const result = await database.query(
+    `SELECT entry.id,
+            ($2::date BETWEEN course.start_date AND course.end_date
+             AND $2::date >= entry.valid_from
+             AND (entry.valid_until IS NULL OR $2::date < entry.valid_until)
+             AND entry.weekday = extract(isodow FROM $2::date)::smallint) AS "isScheduled"
+       FROM schedule_entries AS entry
+       JOIN courses AS course ON course.id = entry.course_id
+      WHERE entry.id = $1`,
+    [entryId, date],
+  );
+  return result.rows[0];
+}
+
+function invalidAttendanceDate(res) {
+  return res.status(400).json({
+    error: {
+      code: 'ATTENDANCE_DATE_NOT_SCHEDULED',
+      message: 'The date must be a scheduled class date within the course and schedule validity period.',
+    },
+  });
+}
+
+function futureAttendanceError(res) {
+  return res.status(400).json({
+    error: {
+      code: 'FUTURE_ATTENDANCE_NOT_ALLOWED',
+      message: 'Attendance cannot be changed for a future date.',
+    },
+  });
+}
+
 export function createAttendanceRouter({ database }) {
   const router = Router();
 
@@ -34,15 +71,15 @@ export function createAttendanceRouter({ database }) {
       });
     }
 
-    const entryResult = await database.query(
-      'SELECT id FROM schedule_entries WHERE id = $1',
-      [entryId],
-    );
-    if (!entryResult.rowCount) {
+    if (futureAttendanceDate(date)) return futureAttendanceError(res);
+
+    const scheduleEntry = await findScheduleForDate(database, entryId, date);
+    if (!scheduleEntry) {
       return res.status(404).json({
         error: { code: 'SCHEDULE_ENTRY_NOT_FOUND', message: 'Schedule entry not found.' },
       });
     }
+    if (!scheduleEntry.isScheduled) return invalidAttendanceDate(res);
 
     const result = await database.query(
       `INSERT INTO attendance (schedule_entry_id, class_date, status, arrived_at, notes)
@@ -67,15 +104,15 @@ export function createAttendanceRouter({ database }) {
       });
     }
 
-    const entryResult = await database.query(
-      'SELECT id FROM schedule_entries WHERE id = $1',
-      [entryId],
-    );
-    if (!entryResult.rowCount) {
+    if (futureAttendanceDate(date)) return futureAttendanceError(res);
+
+    const scheduleEntry = await findScheduleForDate(database, entryId, date);
+    if (!scheduleEntry) {
       return res.status(404).json({
         error: { code: 'SCHEDULE_ENTRY_NOT_FOUND', message: 'Schedule entry not found.' },
       });
     }
+    if (!scheduleEntry.isScheduled) return invalidAttendanceDate(res);
 
     await database.query(
       'DELETE FROM attendance WHERE schedule_entry_id = $1 AND class_date = $2',

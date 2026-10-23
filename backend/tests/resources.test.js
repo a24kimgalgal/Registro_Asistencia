@@ -139,18 +139,20 @@ describe('Weekly schedule endpoints', () => {
 
   test('creates a class with its subject and teacher', async () => {
     const database = {
-      query: jest.fn().mockResolvedValue({
-        rows: [{
-          id: '12',
-          courseId: '4',
-          subjectId: '5',
-          teacherId: '9',
-          weekday: 1,
-          startTime: '08:00:00',
-          endTime: '09:00:00',
-          validFrom: '2026-09-01',
-        }],
-      }),
+      query: jest.fn()
+        .mockResolvedValueOnce({ rowCount: 1, rows: [{ startDate: '2026-09-01' }] })
+        .mockResolvedValueOnce({
+          rows: [{
+            id: '12',
+            courseId: '4',
+            subjectId: '5',
+            teacherId: '9',
+            weekday: 1,
+            startTime: '08:00:00',
+            endTime: '09:00:00',
+            validFrom: '2026-09-01',
+          }],
+        }),
     };
     const response = await request(createApp({ database }))
       .post('/api/v1/courses/4/schedule')
@@ -160,10 +162,13 @@ describe('Weekly schedule endpoints', () => {
         weekday: 1,
         startTime: '08:00',
         endTime: '09:00',
-        validFrom: '2026-09-01',
       });
 
     expect(response.status).toBe(201);
+    expect(database.query.mock.calls[0]).toEqual([
+      'SELECT start_date::text AS "startDate" FROM courses WHERE id = $1',
+      ['4'],
+    ]);
     expect(database.query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO schedule_entries'),
       ['4', '5', '9', 1, '08:00', '09:00', '2026-09-01'],

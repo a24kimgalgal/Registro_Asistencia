@@ -10,6 +10,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/database/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
       - ./backend/database/migrations/002_teachers_and_schedule.sql:/docker-entrypoint-initdb.d/002_teachers_and_schedule.sql:ro
+      - ./backend/database/migrations/003_backdate_initial_schedule_entries.sql:/docker-entrypoint-initdb.d/003_backdate_initial_schedule_entries.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s

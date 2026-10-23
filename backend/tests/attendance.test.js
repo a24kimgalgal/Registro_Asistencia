@@ -59,7 +59,7 @@ describe('Attendance endpoints', () => {
     };
     const database = {
       query: jest.fn()
-        .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: '12' }] })
+        .mockResolvedValueOnce({ rows: [{ id: '12', isScheduled: true }] })
         .mockResolvedValueOnce({ rows: [attendance] }),
     };
 
@@ -69,6 +69,11 @@ describe('Attendance endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.attendance).toEqual(attendance);
+    expect(database.query.mock.calls[0][0]).toContain('entry.valid_from');
+    expect(database.query.mock.calls[0][0]).toContain('entry.valid_until');
+    expect(database.query.mock.calls[0][0]).toContain('course.start_date');
+    expect(database.query.mock.calls[0][0]).toContain('course.end_date');
+    expect(database.query.mock.calls[0][0]).toContain('extract(isodow');
     expect(database.query.mock.calls[1][0]).toContain('ON CONFLICT');
     expect(database.query.mock.calls[1][1]).toEqual([
       '12', '2026-09-07', 'late', '09:12', 'Llegada tarde',
@@ -86,10 +91,57 @@ describe('Attendance endpoints', () => {
     expect(database.query).not.toHaveBeenCalled();
   });
 
+  test('rejects a future attendance date without querying the database', async () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const date = tomorrow.toISOString().slice(0, 10);
+    const database = { query: jest.fn() };
+
+    const response = await request(createApp({ database }))
+      .put(`/api/v1/schedule/12/attendance/${date}`)
+      .send({ status: 'present' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('FUTURE_ATTENDANCE_NOT_ALLOWED');
+    expect(database.query).not.toHaveBeenCalled();
+  });
+
+  test('allows attendance for today', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const database = {
+      query: jest.fn()
+        .mockResolvedValueOnce({ rows: [{ id: '12', isScheduled: true }] })
+        .mockResolvedValueOnce({ rows: [{ status: 'present', classDate: today }] }),
+    };
+
+    const response = await request(createApp({ database }))
+      .put(`/api/v1/schedule/12/attendance/${today}`)
+      .send({ status: 'present' });
+
+    expect(response.status).toBe(200);
+    expect(database.query).toHaveBeenCalledTimes(2);
+  });
+
+  test('rejects a date outside the course or schedule validity', async () => {
+    const database = {
+      query: jest.fn().mockResolvedValueOnce({
+        rows: [{ id: '12', isScheduled: false }],
+      }),
+    };
+
+    const response = await request(createApp({ database }))
+      .put('/api/v1/schedule/12/attendance/2026-09-07')
+      .send({ status: 'present' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('ATTENDANCE_DATE_NOT_SCHEDULED');
+    expect(database.query).toHaveBeenCalledTimes(1);
+  });
+
   test('deletes an attendance record and returns no content', async () => {
     const database = {
       query: jest.fn()
-        .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: '12' }] })
+        .mockResolvedValueOnce({ rows: [{ id: '12', isScheduled: true }] })
         .mockResolvedValueOnce({ rowCount: 1, rows: [] }),
     };
     const response = await request(createApp({ database }))
@@ -97,5 +149,19 @@ describe('Attendance endpoints', () => {
 
     expect(response.status).toBe(204);
     expect(database.query.mock.calls[1][1]).toEqual(['12', '2026-09-07']);
+  });
+
+  test('does not delete an attendance record for a future date', async () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const date = tomorrow.toISOString().slice(0, 10);
+    const database = { query: jest.fn() };
+
+    const response = await request(createApp({ database }))
+      .delete(`/api/v1/schedule/12/attendance/${date}`);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('FUTURE_ATTENDANCE_NOT_ALLOWED');
+    expect(database.query).not.toHaveBeenCalled();
   });
 });

@@ -89,17 +89,26 @@ export function createScheduleRouter({ database, standalone = false }) {
 
   router.post('/', async (req, res) => {
     const courseId = standalone ? req.body?.courseId : req.params.courseId;
-    const { subjectId, teacherId = null, weekday, startTime, endTime, validFrom } = req.body ?? {};
+    const { subjectId, teacherId = null, weekday, startTime, endTime } = req.body ?? {};
     if (
       !isPositiveId(courseId)
       || !validEntry({ subjectId, teacherId, weekday, startTime, endTime })
-      || !isValidDate(validFrom)
     ) {
       return res.status(400).json({
         error: {
           code: 'INVALID_SCHEDULE_ENTRY',
-          message: 'Provide a valid subject, optional teacher, weekday (1-5), start/end time, and validFrom.',
+          message: 'Provide a valid subject, optional teacher, weekday (1-5), and start/end time.',
         },
+      });
+    }
+
+    const courseResult = await database.query(
+      'SELECT start_date::text AS "startDate" FROM courses WHERE id = $1',
+      [courseId],
+    );
+    if (!courseResult.rowCount) {
+      return res.status(404).json({
+        error: { code: 'COURSE_NOT_FOUND', message: 'Course not found.' },
       });
     }
 
@@ -110,7 +119,7 @@ export function createScheduleRouter({ database, standalone = false }) {
       weekday,
       startTime,
       endTime,
-      validFrom,
+      validFrom: courseResult.rows[0].startDate,
     });
     return res.status(201).json({ scheduleEntry: entry });
   });

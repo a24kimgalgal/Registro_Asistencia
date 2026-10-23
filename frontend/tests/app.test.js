@@ -74,6 +74,99 @@ describe('initial calendar screen', () => {
     wrapper.unmount();
   });
 
+  it('shows past classes across the full course period for attendance', async () => {
+    const today = new Date();
+    const monthAt = (offset) => new Date(today.getFullYear(), today.getMonth() + offset, 1);
+    const courseStart = monthAt(-20);
+    courseStart.setDate(15);
+    const courseEnd = new Date(today.getFullYear(), today.getMonth() + 6, 0);
+    const pastClassDate = new Date(today.getFullYear(), today.getMonth() - 15, 15);
+    const dateKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const expectedMonth = (date) => new Intl.DateTimeFormat('es-ES', {
+      month: 'long',
+      year: 'numeric',
+    }).format(date).replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase('es-ES'));
+    const pastDate = dateKey(pastClassDate);
+    const course = {
+      id: '4',
+      name: 'Curso largo',
+      academicYear: '2024-2027',
+      startDate: dateKey(courseStart),
+      endDate: dateKey(courseEnd),
+      isCurrent: true,
+    };
+    fetch.mockImplementation(async (url) => {
+      if (url.endsWith('/health')) return response({ status: 'ok', database: 'connected' });
+      if (url.endsWith('/courses')) return response({ courses: [course] });
+      if (url.includes('/month?')) {
+        return response({
+          classes: [{
+            scheduleEntryId: '12',
+            classDate: pastDate,
+            subjectId: '5',
+            subjectName: 'Programación',
+            teacherName: 'Ana Pérez',
+            startTime: '09:00:00',
+            endTime: '10:00:00',
+            status: 'pending',
+            arrivedAt: null,
+            notes: null,
+          }],
+        });
+      }
+      if (url.includes('/schedule?')) return response({ schedule: [] });
+      if (url.endsWith('/subjects')) return response({ subjects: [] });
+      return response({});
+    });
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), createVuetify()],
+      },
+    });
+    await flushPromises();
+
+    for (let month = 0; month < 15; month += 1) {
+      await wrapper.get('[aria-label="Mes anterior"]').trigger('click');
+      await flushPromises();
+    }
+    expect(wrapper.find('.month-title').text()).toBe(expectedMonth(pastClassDate));
+
+    for (let month = 0; month < 5; month += 1) {
+      await wrapper.get('[aria-label="Mes anterior"]').trigger('click');
+      await flushPromises();
+    }
+    expect(wrapper.find('.month-title').text()).toBe(expectedMonth(courseStart));
+    expect(wrapper.get('[aria-label="Mes anterior"]').element.disabled).toBe(true);
+    const dateBeforeCourse = wrapper.findAll('.calendar-day-button')
+      .find((button) => button.get('time').attributes('datetime') < course.startDate);
+    expect(dateBeforeCourse.element.disabled).toBe(true);
+
+    for (let month = 0; month < 5; month += 1) {
+      await wrapper.get('[aria-label="Mes siguiente"]').trigger('click');
+      await flushPromises();
+    }
+    expect(wrapper.find('.month-title').text()).toBe(expectedMonth(pastClassDate));
+
+    await wrapper.findAll('.primary-nav button')
+      .find((button) => button.text().trim() === 'Horario')
+      .trigger('click');
+    await flushPromises();
+    const dateInput = wrapper.get('input[type="date"]');
+    expect(dateInput.attributes('min')).toBe(course.startDate);
+    expect(dateInput.attributes('max')).toBe(course.endDate);
+    await dateInput.setValue(pastDate);
+    await dateInput.trigger('change');
+    await flushPromises();
+
+    expect(wrapper.find('.day-class-card').text()).toContain('Programación');
+    expect(wrapper.findAll('.quick-attendance-actions button')).toHaveLength(3);
+    expect(wrapper.findAll('.quick-attendance-actions button').every((button) => !button.element.disabled)).toBe(true);
+    expect(fetch.mock.calls.some(([url]) => url.includes(`/month?year=${pastClassDate.getFullYear()}&month=${String(pastClassDate.getMonth() + 1).padStart(2, '0')}`))).toBe(true);
+
+    wrapper.unmount();
+  });
+
   it('shows the empty state for a course without subjects', async () => {
     const wrapper = mount(App, {
       global: {
