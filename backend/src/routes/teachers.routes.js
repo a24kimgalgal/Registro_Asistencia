@@ -4,16 +4,12 @@ import {
   isPositiveId,
 } from './route-helpers.js';
 
-export function createTeachersRouter({ database }) {
+export function createTeachersRouter({ repositories }) {
   const router = Router();
 
   router.get('/', async (req, res) => {
-    const result = await database.query(
-      `SELECT id, name, is_active AS "isActive", created_at AS "createdAt"
-         FROM teachers
-        ORDER BY name, id`,
-    );
-    return res.json({ teachers: result.rows });
+    const teachers = await repositories.teachers.list();
+    return res.json({ teachers });
   });
 
   router.post('/', async (req, res) => {
@@ -21,13 +17,8 @@ export function createTeachersRouter({ database }) {
     if (!isNonEmptyString(name)) {
       return res.status(400).json({ error: { code: 'INVALID_TEACHER', message: 'A teacher name is required.' } });
     }
-    const result = await database.query(
-      `INSERT INTO teachers (name)
-       VALUES ($1)
-       RETURNING id, name, is_active AS "isActive", created_at AS "createdAt"`,
-      [name.trim()],
-    );
-    return res.status(201).json({ teacher: result.rows[0] });
+    const teacher = await repositories.teachers.create(name.trim());
+    return res.status(201).json({ teacher });
   });
 
   router.patch('/:teacherId', async (req, res) => {
@@ -44,34 +35,21 @@ export function createTeachersRouter({ database }) {
       return res.status(400).json({ error: { code: 'INVALID_TEACHER', message: 'Provide valid teacher fields to update.' } });
     }
 
-    const columns = { name: 'name', isActive: 'is_active' };
-    const values = keys.map((key) => (
-      key === 'name' ? updates[key].trim() : updates[key]
-    ));
-    const setClause = keys.map((key, index) => `${columns[key]} = $${index + 1}`).join(', ');
-    const result = await database.query(
-      `UPDATE teachers SET ${setClause}
-        WHERE id = $${keys.length + 1}
-        RETURNING id, name, is_active AS "isActive", created_at AS "createdAt"`,
-      [...values, teacherId],
-    );
-    if (!result.rowCount) {
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.name !== undefined) normalizedUpdates.name = normalizedUpdates.name.trim();
+    const teacher = await repositories.teachers.update(teacherId, normalizedUpdates);
+    if (!teacher) {
       return res.status(404).json({ error: { code: 'TEACHER_NOT_FOUND', message: 'Teacher not found.' } });
     }
-    return res.json({ teacher: result.rows[0] });
+    return res.json({ teacher });
   });
 
   router.delete('/:teacherId', async (req, res) => {
     if (!isPositiveId(req.params.teacherId)) {
       return res.status(400).json({ error: { code: 'INVALID_ID', message: 'teacherId must be a positive integer.' } });
     }
-    const result = await database.query(
-      `UPDATE teachers SET is_active = false
-        WHERE id = $1 AND is_active = true
-        RETURNING id`,
-      [req.params.teacherId],
-    );
-    if (!result.rowCount) {
+    const deactivated = await repositories.teachers.deactivate(req.params.teacherId);
+    if (!deactivated) {
       return res.status(404).json({ error: { code: 'TEACHER_NOT_FOUND', message: 'Active teacher not found.' } });
     }
     return res.status(204).send();

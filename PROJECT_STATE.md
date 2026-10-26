@@ -8,11 +8,11 @@ Implementación inicial utilizable. El backend Express ofrece cursos, materias, 
 
 En Administración, la fecha técnica `validFrom` ya no se pide al crear una asignación. El backend la toma del inicio del curso; al cambiar una asignación, la versión nueva empieza en la fecha efectiva del cambio y la anterior conserva su vigencia. Los cursos finalizados no admiten nuevas asignaciones. Cerrar una asignación termina su vigencia conservando el historial; Borrar elimina solo asignaciones que no tienen asistencias. Las materias sin horario se eliminan y las ya usadas en horarios se desactivan para preservar el historial.
 
-Mantener la implementación sencilla: reutilizar las rutas existentes y evitar añadir capas, automatismos o dependencias que no hagan falta para este flujo.
+Mantener la implementación sencilla: reutilizar rutas y repositorios existentes y evitar automatismos o dependencias que no hagan falta.
 
 ## Decisión de Base de Datos
 
-**PostgreSQL (relacional).** Los cursos, materias, horarios semanales y registros de asistencia tienen relaciones claras y requieren integridad (por ejemplo, impedir dos registros para la misma clase y fecha). El modelo relacional también facilita consultar y resumir la asistencia por mes, materia y curso.
+**PostgreSQL (relacional).** Los cursos, materias, horarios semanales y registros de asistencia tienen relaciones claras y requieren integridad (por ejemplo, impedir dos registros para la misma clase y fecha). El modelo relacional también facilita consultar y resumir la asistencia por mes, materia y curso. El backend usa el patrón repositorio: las rutas dependen de operaciones de dominio y la implementación PostgreSQL concentra las consultas y transacciones específicas del motor.
 
 ## Alcance Inicial
 
@@ -33,7 +33,10 @@ Estructura objetivo con backend y frontend separados, y la configuración común
 ```text
 /
 ├── backend/                 # Node.js, Express, Socket.io y acceso PostgreSQL
-│   ├── src/                 # App Express, configuración, pool PostgreSQL y health check
+│   ├── src/
+│   │   ├── database/        # Adaptador de conexión PostgreSQL y transacciones
+│   │   ├── repositories/    # Repositorios PostgreSQL por dominio
+│   │   └── routes/          # API Express, desacoplada de consultas SQL
 │   ├── tests/               # Jest
 │   ├── database/
 │   │   ├── migrations/      # Migraciones versionadas
@@ -55,14 +58,15 @@ Backend y frontend mantienen sus dependencias y comandos separados. Los workflow
 
 ## Esquemas de Datos (Modelos)
 
-- Las migraciones están en `backend/database/migrations/001_initial_schema.sql` y `002_teachers_and_schedule.sql`. El esquema está implementado en PostgreSQL sin acoplarlo todavía a un ORM concreto.
+- Las migraciones están en `backend/database/migrations/001_initial_schema.sql` y `002_teachers_and_schedule.sql`. El esquema está implementado en PostgreSQL sin acoplarlo a un ORM concreto.
+- **Persistencia:** las rutas dependen de `repositories` y no envían SQL directamente. `backend/src/repositories/postgres.js` implementa los contratos de cursos, materias, profesores, horarios, asistencias, clases mensuales y health check. `backend/src/database/postgres.js` encapsula el pool, las transacciones, la comprobación de conexión y el cierre asíncrono. Para migrar a otro motor se conserva la API y se implementan esos contratos y su adaptador para el nuevo dialecto; las migraciones también deberán traducirse.
 - **Course** (`courses`): `id` (`bigint` identity), `name`, `academic_year`, `start_date`, `end_date`, `is_current` (por defecto `false`) y `created_at` (`timestamptz`). `end_date` no puede preceder a `start_date`; el par (`academic_year`, `name`) es único y un índice único parcial permite un solo curso actual.
 - **Subject** (`subjects`): `id`, `course_id`, `name`, `color` opcional, `is_active` (por defecto `true`) y `created_at`. Relación N:1 con Course. El nombre no se repite dentro del mismo curso, sin distinguir mayúsculas/minúsculas. La API elimina materias sin asignaciones y desactiva las que ya aparecen en horarios para preservar el historial.
 - **Teacher** (`teachers`): `id`, `name`, `is_active` (por defecto `true`) y `created_at`. Es un catálogo común de profesores. Los nombres de profesores activos no se repiten sin distinguir mayúsculas/minúsculas; retirar un profesor lo desactiva y conserva el historial.
 - **ScheduleEntry** (`schedule_entries`): `id`, `course_id`, `subject_id`, `teacher_id` opcional, `weekday` (ISO: lunes=1 a viernes=5), `start_time`, `end_time`, `valid_from`, `valid_until` opcional. Relación N:1 con Course, Subject y Teacher; una clave foránea compuesta garantiza que la materia pertenezca al mismo curso. La vigencia se interpreta como intervalo semiabierto `[valid_from, valid_until)`, por lo que `valid_until` no forma parte del período. Los horarios no pueden tener fin anterior o igual al inicio ni solaparse en día, hora y período de vigencia. Una vez creada una asignación, su curso, materia, profesor, día, horas y comienzo son inmutables; se cierra asignando `valid_until` y se inserta otra asignación para preservar el historial.
 - **Attendance** (`attendance`): `id`, `schedule_entry_id`, `class_date`, `status` (`present`, `absent`, `late`), `arrived_at` opcional, `notes` opcional, `created_at` y `updated_at` (`timestamptz`). Relación N:1 con ScheduleEntry; restricción única sobre (`schedule_entry_id`, `class_date`). Un trigger valida que la fecha corresponda al día y a la vigencia de la asignación. `arrived_at` solo se admite con estado `late`; `updated_at` se refresca al modificar el registro.
 
-Los identificadores y relaciones usan claves foráneas restrictivas para no borrar datos históricos por cascada. Los índices cubren la selección del curso actual, materias y horarios por curso, la búsqueda mensual de asistencias y la exclusión de horarios solapados. Al cargar calendarios mensuales, el backend debe recuperar asistencias por rango de fechas mediante una consulta conjunta con asignaciones y materias (o una consulta por lote); no debe consultar cada clase individualmente para evitar N+1.
+Los identificadores y relaciones usan claves foráneas restrictivas para no borrar datos históricos por cascada. Los índices cubren la selección del curso actual, materias y horarios por curso, la búsqueda mensual de asistencias y la exclusión de horarios solapados. Al cargar calendarios mensuales, el repositorio recupera asistencias en una consulta conjunta con asignaciones y materias; no consulta cada clase individualmente, evitando N+1. Las operaciones de persistencia y transacción son asíncronas y se esperan con `await`; el pool PostgreSQL limita las conexiones concurrentes a 10 y libera las conexiones ociosas.
 
 Las clases que aparecen en una fecha se derivan del horario vigente de ese curso. Si no existe un registro de asistencia para una clase, se muestra como pendiente/no registrado; no se interpreta automáticamente como falta.
 

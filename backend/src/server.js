@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
 import { getConfig } from './config.js';
-import { createDatabasePool } from './database/pool.js';
+import { createPostgresDatabase } from './database/postgres.js';
+import { createPostgresRepositories } from './repositories/postgres.js';
 
 const logger = console;
 let server;
@@ -9,18 +10,19 @@ let shuttingDown = false;
 
 async function start() {
   const config = getConfig();
-  const database = createDatabasePool(config.databaseConfig);
+  const database = createPostgresDatabase(config.databaseConfig);
 
   try {
-    await database.query('SELECT 1');
+    await database.ping();
   } catch (error) {
     logger.error('Could not connect to PostgreSQL. Check DATABASE_URL and database availability.', error);
-    await database.end();
+    await database.close();
     process.exitCode = 1;
     return;
   }
 
-  const app = createApp({ database, logger });
+  const repositories = createPostgresRepositories(database);
+  const app = createApp({ repositories, logger });
 
   server = app.listen(config.port, () => {
     logger.info(`API listening on port ${config.port}`);
@@ -40,7 +42,7 @@ async function start() {
         process.exitCode = 1;
       }
 
-      database.end().catch((databaseError) => {
+      database.close().catch((databaseError) => {
         logger.error('Failed to close the PostgreSQL connection pool.', databaseError);
         process.exitCode = 1;
       });

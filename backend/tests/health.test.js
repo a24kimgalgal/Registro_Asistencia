@@ -1,13 +1,14 @@
 import { jest } from '@jest/globals';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
+import { createPostgresRepositories } from '../src/repositories/postgres.js';
 
 describe('GET /api/v1/health', () => {
   test('confirms the database connection', async () => {
     const database = {
       query: jest.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }),
     };
-    const app = createApp({ database });
+    const app = createApp({ repositories: createPostgresRepositories(database) });
 
     const response = await request(app).get('/api/v1/health');
 
@@ -24,7 +25,7 @@ describe('GET /api/v1/health', () => {
     const database = {
       query: jest.fn().mockRejectedValue(new Error('sensitive connection detail')),
     };
-    const app = createApp({ database, logger });
+    const app = createApp({ repositories: createPostgresRepositories(database), logger });
 
     const response = await request(app).get('/api/v1/health');
 
@@ -40,7 +41,9 @@ describe('GET /api/v1/health', () => {
 
 describe('API fallback routes', () => {
   test('returns a JSON 404 for routes not implemented yet', async () => {
-    const app = createApp({ database: { query: jest.fn() } });
+    const app = createApp({
+      repositories: createPostgresRepositories({ query: jest.fn() }),
+    });
 
     const response = await request(app).get('/api/v1/not-implemented');
 

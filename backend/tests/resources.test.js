@@ -1,6 +1,11 @@
 import { jest } from '@jest/globals';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
+import { createPostgresRepositories } from '../src/repositories/postgres.js';
+
+function createTestApp(database) {
+  return createApp({ repositories: createPostgresRepositories(database) });
+}
 
 describe('Course endpoints', () => {
   test('creates a course with valid dates', async () => {
@@ -21,7 +26,7 @@ describe('Course endpoints', () => {
         release: jest.fn(),
       }),
     };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .post('/api/v1/courses')
       .send(course);
 
@@ -31,7 +36,7 @@ describe('Course endpoints', () => {
 
   test('rejects an invalid course date before accessing the database', async () => {
     const database = { query: jest.fn() };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .post('/api/v1/courses')
       .send({
         name: '2 DAW',
@@ -53,7 +58,7 @@ describe('Subject and teacher endpoints', () => {
         rows: [{ id: '5', courseId: '4', name: 'Programación', color: null, isActive: true }],
       }),
     };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .post('/api/v1/courses/4/subjects')
       .send({ name: ' Programación ' });
 
@@ -70,7 +75,7 @@ describe('Subject and teacher endpoints', () => {
         rows: [{ id: '9', name: 'Carles Narvaez', isActive: true }],
       }),
     };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .post('/api/v1/teachers')
       .send({ name: 'Carles Narvaez' });
 
@@ -91,7 +96,7 @@ describe('Subject and teacher endpoints', () => {
     };
     const database = { connect: jest.fn().mockResolvedValue(client) };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .delete('/api/v1/subjects/5');
 
     expect(response.status).toBe(200);
@@ -113,7 +118,7 @@ describe('Subject and teacher endpoints', () => {
     };
     const database = { connect: jest.fn().mockResolvedValue(client) };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .delete('/api/v1/subjects/5');
 
     expect(response.status).toBe(200);
@@ -128,7 +133,7 @@ describe('Weekly schedule endpoints', () => {
     const database = {
       query: jest.fn().mockResolvedValue({ rows: [] }),
     };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .get('/api/v1/courses/4/schedule?date=2026-10-22');
 
     expect(response.status).toBe(200);
@@ -154,7 +159,7 @@ describe('Weekly schedule endpoints', () => {
           }],
         }),
     };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .post('/api/v1/courses/4/schedule')
       .send({
         subjectId: 5,
@@ -178,7 +183,7 @@ describe('Weekly schedule endpoints', () => {
 
   test('rejects invalid weekday and non-increasing times', async () => {
     const database = { query: jest.fn() };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .post('/api/v1/courses/4/schedule')
       .send({
         subjectId: 5,
@@ -205,7 +210,7 @@ describe('Weekly schedule endpoints', () => {
     };
     const database = { connect: jest.fn().mockResolvedValue(client) };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .delete('/api/v1/schedule/12/permanent');
 
     expect(response.status).toBe(204);
@@ -228,7 +233,7 @@ describe('Weekly schedule endpoints', () => {
     };
     const database = { connect: jest.fn().mockResolvedValue(client) };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .delete('/api/v1/schedule/12/permanent');
 
     expect(response.status).toBe(409);
@@ -250,7 +255,7 @@ describe('Weekly schedule endpoints', () => {
     };
     const database = { connect: jest.fn().mockResolvedValue(client) };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .delete('/api/v1/schedule/12/permanent');
 
     expect(response.status).toBe(404);

@@ -1,6 +1,11 @@
 import { jest } from '@jest/globals';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
+import { createPostgresRepositories } from '../src/repositories/postgres.js';
+
+function createTestApp(database) {
+  return createApp({ repositories: createPostgresRepositories(database) });
+}
 
 describe('Monthly classes endpoint', () => {
   test('returns scheduled classes and leaves unrecorded classes pending', async () => {
@@ -22,7 +27,7 @@ describe('Monthly classes endpoint', () => {
         .mockResolvedValueOnce({ rows: classes }),
     };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .get('/api/v1/courses/4/month?year=2026&month=09');
 
     expect(response.status).toBe(200);
@@ -38,7 +43,7 @@ describe('Monthly classes endpoint', () => {
 
   test('rejects an invalid month without querying the database', async () => {
     const database = { query: jest.fn() };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .get('/api/v1/courses/4/month?year=2026&month=13');
 
     expect(response.status).toBe(400);
@@ -63,7 +68,7 @@ describe('Attendance endpoints', () => {
         .mockResolvedValueOnce({ rows: [attendance] }),
     };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .put('/api/v1/schedule/12/attendance/2026-09-07')
       .send({ status: 'late', arrivedAt: '09:12', notes: 'Llegada tarde' });
 
@@ -82,7 +87,7 @@ describe('Attendance endpoints', () => {
 
   test('rejects arrival time for a status other than late', async () => {
     const database = { query: jest.fn() };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .put('/api/v1/schedule/12/attendance/2026-09-07')
       .send({ status: 'present', arrivedAt: '09:12' });
 
@@ -97,7 +102,7 @@ describe('Attendance endpoints', () => {
     const date = tomorrow.toISOString().slice(0, 10);
     const database = { query: jest.fn() };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .put(`/api/v1/schedule/12/attendance/${date}`)
       .send({ status: 'present' });
 
@@ -114,7 +119,7 @@ describe('Attendance endpoints', () => {
         .mockResolvedValueOnce({ rows: [{ status: 'present', classDate: today }] }),
     };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .put(`/api/v1/schedule/12/attendance/${today}`)
       .send({ status: 'present' });
 
@@ -129,7 +134,7 @@ describe('Attendance endpoints', () => {
       }),
     };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .put('/api/v1/schedule/12/attendance/2026-09-07')
       .send({ status: 'present' });
 
@@ -144,7 +149,7 @@ describe('Attendance endpoints', () => {
         .mockResolvedValueOnce({ rows: [{ id: '12', isScheduled: true }] })
         .mockResolvedValueOnce({ rowCount: 1, rows: [] }),
     };
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .delete('/api/v1/schedule/12/attendance/2026-09-07');
 
     expect(response.status).toBe(204);
@@ -157,7 +162,7 @@ describe('Attendance endpoints', () => {
     const date = tomorrow.toISOString().slice(0, 10);
     const database = { query: jest.fn() };
 
-    const response = await request(createApp({ database }))
+    const response = await request(createTestApp(database))
       .delete(`/api/v1/schedule/12/attendance/${date}`);
 
     expect(response.status).toBe(400);

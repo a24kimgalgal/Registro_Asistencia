@@ -3,10 +3,9 @@ import {
   isNonEmptyString,
   isOptionalString,
   isPositiveId,
-  withTransaction,
 } from './route-helpers.js';
 
-export function createSubjectsRouter({ database, standalone = false }) {
+export function createSubjectsRouter({ repositories, standalone = false }) {
   const router = Router({ mergeParams: true });
 
   router.get('/', async (req, res) => {
@@ -15,15 +14,8 @@ export function createSubjectsRouter({ database, standalone = false }) {
       return res.status(400).json({ error: { code: 'INVALID_ID', message: 'A valid courseId is required.' } });
     }
 
-    const result = await database.query(
-      `SELECT id, course_id AS "courseId", name, color,
-              is_active AS "isActive", created_at AS "createdAt"
-         FROM subjects
-        WHERE course_id = $1
-        ORDER BY name, id`,
-      [courseId],
-    );
-    return res.json({ subjects: result.rows });
+    const subjects = await repositories.subjects.list(courseId);
+    return res.json({ subjects });
   });
 
   router.post('/', async (req, res) => {
@@ -35,14 +27,12 @@ export function createSubjectsRouter({ database, standalone = false }) {
       });
     }
 
-    const result = await database.query(
-      `INSERT INTO subjects (course_id, name, color)
-       VALUES ($1, $2, $3)
-       RETURNING id, course_id AS "courseId", name, color,
-                 is_active AS "isActive", created_at AS "createdAt"`,
-      [courseId, name.trim(), color?.trim() || null],
-    );
-    return res.status(201).json({ subject: result.rows[0] });
+    const subject = await repositories.subjects.create({
+      courseId,
+      name: name.trim(),
+      color: color?.trim() || null,
+    });
+    return res.status(201).json({ subject });
   });
 
   router.patch('/:subjectId', async (req, res) => {
@@ -61,23 +51,11 @@ export function createSubjectsRouter({ database, standalone = false }) {
       return res.status(400).json({ error: { code: 'INVALID_SUBJECT', message: 'Provide valid subject fields to update.' } });
     }
 
-    const columns = { name: 'name', color: 'color', isActive: 'is_active' };
-    const values = keys.map((key) => {
-      const value = updates[key];
-      return key === 'name' ? value.trim() : key === 'color' ? value?.trim() || null : value;
-    });
-    const setClause = keys.map((key, index) => `${columns[key]} = $${index + 1}`).join(', ');
-    const result = await database.query(
-      `UPDATE subjects SET ${setClause}
-        WHERE id = $${keys.length + 1}
-        RETURNING id, course_id AS "courseId", name, color,
-                  is_active AS "isActive", created_at AS "createdAt"`,
-      [...values, subjectId],
-    );
-    if (!result.rowCount) {
+    const subject = await repositories.subjects.update(subjectId, updates);
+    if (!subject) {
       return res.status(404).json({ error: { code: 'SUBJECT_NOT_FOUND', message: 'Subject not found.' } });
     }
-    return res.json({ subject: result.rows[0] });
+    return res.json({ subject });
   });
 
   router.delete('/:subjectId', async (req, res) => {
@@ -86,31 +64,7 @@ export function createSubjectsRouter({ database, standalone = false }) {
       return res.status(400).json({ error: { code: 'INVALID_ID', message: 'subjectId must be a positive integer.' } });
     }
 
-    const result = await withTransaction(database, async (client) => {
-      const subjectResult = await client.query(
-        `SELECT id, is_active AS "isActive",
-                EXISTS (
-                  SELECT 1 FROM schedule_entries WHERE subject_id = subjects.id
-                ) AS "hasSchedule"
-           FROM subjects
-          WHERE id = $1
-          FOR UPDATE`,
-        [subjectId],
-      );
-      const subject = subjectResult.rows[0];
-      if (!subject || !subject.isActive) return null;
-
-      if (subject.hasSchedule) {
-        await client.query(
-          'UPDATE subjects SET is_active = false WHERE id = $1',
-          [subjectId],
-        );
-        return { action: 'deactivated' };
-      }
-
-      await client.query('DELETE FROM subjects WHERE id = $1', [subjectId]);
-      return { action: 'deleted' };
-    });
+    const result = await repositories.subjects.delete(subjectId);
 
     if (!result) {
       return res.status(404).json({ error: { code: 'SUBJECT_NOT_FOUND', message: 'Active subject not found.' } });

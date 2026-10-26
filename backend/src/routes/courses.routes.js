@@ -3,21 +3,14 @@ import {
   isNonEmptyString,
   isPositiveId,
   isValidDate,
-  withTransaction,
 } from './route-helpers.js';
 
-export function createCoursesRouter({ database }) {
+export function createCoursesRouter({ repositories }) {
   const router = Router();
 
   router.get('/', async (req, res) => {
-    const result = await database.query(
-      `SELECT id, name, academic_year AS "academicYear",
-              start_date AS "startDate", end_date AS "endDate",
-              is_current AS "isCurrent", created_at AS "createdAt"
-         FROM courses
-        ORDER BY is_current DESC, start_date DESC, id`,
-    );
-    return res.json({ courses: result.rows });
+    const courses = await repositories.courses.list();
+    return res.json({ courses });
   });
 
   router.post('/', async (req, res) => {
@@ -38,25 +31,13 @@ export function createCoursesRouter({ database }) {
       });
     }
 
-    const insertCourse = async (client) => {
-      if (isCurrent) {
-        await client.query('UPDATE courses SET is_current = false WHERE is_current = true');
-      }
-
-      const result = await client.query(
-        `INSERT INTO courses (name, academic_year, start_date, end_date, is_current)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, academic_year AS "academicYear",
-                   start_date AS "startDate", end_date AS "endDate",
-                   is_current AS "isCurrent", created_at AS "createdAt"`,
-        [name.trim(), academicYear.trim(), startDate, endDate, isCurrent],
-      );
-      return result.rows[0];
-    };
-
-    const course = isCurrent
-      ? await withTransaction(database, insertCourse)
-      : await insertCourse(database);
+    const course = await repositories.courses.create({
+      name: name.trim(),
+      academicYear: academicYear.trim(),
+      startDate,
+      endDate,
+      isCurrent,
+    });
     return res.status(201).json({ course });
   });
 
@@ -67,57 +48,27 @@ export function createCoursesRouter({ database }) {
       return res.status(400).json({ error: { code: 'INVALID_ID', message: 'courseId must be a positive integer.' } });
     }
 
-    const columns = {
+    const validators = {
       name: (value) => isNonEmptyString(value),
       academicYear: (value) => isNonEmptyString(value),
       startDate: isValidDate,
       endDate: isValidDate,
       isCurrent: (value) => typeof value === 'boolean',
     };
-    const sqlColumns = {
-      name: 'name',
-      academicYear: 'academic_year',
-      startDate: 'start_date',
-      endDate: 'end_date',
-      isCurrent: 'is_current',
-    };
     const keys = Object.keys(updates);
     if (
       keys.length === 0
-      || keys.some((key) => !columns[key] || !columns[key](updates[key]))
+      || keys.some((key) => !validators[key] || !validators[key](updates[key]))
     ) {
       return res.status(400).json({ error: { code: 'INVALID_COURSE', message: 'Provide valid course fields to update.' } });
     }
 
-    const updateCourse = async (client) => {
-      const currentCourse = await client.query(
-        'SELECT id FROM courses WHERE id = $1 FOR UPDATE',
-        [courseId],
-      );
-      if (!currentCourse.rowCount) {
-        return null;
-      }
-      if (updates.isCurrent === true) {
-        await client.query('UPDATE courses SET is_current = false WHERE is_current = true');
-      }
-      const values = keys.map((key) => (
-        key === 'name' || key === 'academicYear' ? updates[key].trim() : updates[key]
-      ));
-      const setClause = keys.map((key, index) => `${sqlColumns[key]} = $${index + 1}`).join(', ');
-      const result = await client.query(
-        `UPDATE courses SET ${setClause}
-          WHERE id = $${keys.length + 1}
-          RETURNING id, name, academic_year AS "academicYear",
-                    start_date AS "startDate", end_date AS "endDate",
-                    is_current AS "isCurrent", created_at AS "createdAt"`,
-        [...values, courseId],
-      );
-      return result.rows[0];
-    };
-
-    const course = updates.isCurrent === true
-      ? await withTransaction(database, updateCourse)
-      : await updateCourse(database);
+    const normalizedUpdates = { ...updates };
+    if (normalizedUpdates.name !== undefined) normalizedUpdates.name = normalizedUpdates.name.trim();
+    if (normalizedUpdates.academicYear !== undefined) {
+      normalizedUpdates.academicYear = normalizedUpdates.academicYear.trim();
+    }
+    const course = await repositories.courses.update(courseId, normalizedUpdates);
     if (!course) {
       return res.status(404).json({ error: { code: 'COURSE_NOT_FOUND', message: 'Course not found.' } });
     }
@@ -129,8 +80,8 @@ export function createCoursesRouter({ database }) {
       return res.status(400).json({ error: { code: 'INVALID_ID', message: 'courseId must be a positive integer.' } });
     }
 
-    const result = await database.query('DELETE FROM courses WHERE id = $1 RETURNING id', [req.params.courseId]);
-    if (!result.rowCount) {
+    const deleted = await repositories.courses.delete(req.params.courseId);
+    if (!deleted) {
       return res.status(404).json({ error: { code: 'COURSE_NOT_FOUND', message: 'Course not found.' } });
     }
     return res.status(204).send();

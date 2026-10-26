@@ -1,11 +1,11 @@
 import { Router } from 'express';
 
-export function createHealthRouter({ database, logger = console }) {
+export function createHealthRouter({ repositories, logger = console }) {
   const router = Router();
 
   router.get('/', async (req, res) => {
     try {
-      await database.query('SELECT 1');
+      await repositories.health.check();
       return res.status(200).json({
         status: 'ok',
         database: 'connected',

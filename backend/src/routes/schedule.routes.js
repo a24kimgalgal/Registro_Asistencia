@@ -4,23 +4,7 @@ import {
   isValidDate,
   isValidTime,
   timeInSeconds,
-  withTransaction,
 } from './route-helpers.js';
-
-const scheduleSelect = `
-  SELECT entry.id, entry.course_id AS "courseId",
-         entry.subject_id AS "subjectId", subject.name AS "subjectName",
-         entry.teacher_id AS "teacherId", teacher.name AS "teacherName",
-         entry.weekday, entry.start_time AS "startTime",
-         entry.end_time AS "endTime", entry.valid_from AS "validFrom",
-         entry.valid_until AS "validUntil",
-         (SELECT max(attendance.class_date)
-            FROM attendance
-           WHERE attendance.schedule_entry_id = entry.id) AS "lastAttendanceDate"
-    FROM schedule_entries AS entry
-    JOIN subjects AS subject ON subject.id = entry.subject_id
-    LEFT JOIN teachers AS teacher ON teacher.id = entry.teacher_id
-`;
 
 function validWeekday(value) {
   return Number.isInteger(value) && value >= 1 && value <= 5;
@@ -39,29 +23,7 @@ function validEntry({ subjectId, teacherId, weekday, startTime, endTime }) {
     && timeInSeconds(endTime) > timeInSeconds(startTime);
 }
 
-async function createEntry(database, {
-  courseId,
-  subjectId,
-  teacherId,
-  weekday,
-  startTime,
-  endTime,
-  validFrom,
-}) {
-  const result = await database.query(
-    `INSERT INTO schedule_entries
-       (course_id, subject_id, teacher_id, weekday, start_time, end_time, valid_from)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, course_id AS "courseId", subject_id AS "subjectId",
-               teacher_id AS "teacherId", weekday,
-               start_time AS "startTime", end_time AS "endTime",
-               valid_from AS "validFrom", valid_until AS "validUntil"`,
-    [courseId, subjectId, teacherId ?? null, weekday, startTime, endTime, validFrom],
-  );
-  return result.rows[0];
-}
-
-export function createScheduleRouter({ database, standalone = false }) {
+export function createScheduleRouter({ repositories, standalone = false }) {
   const router = Router({ mergeParams: true });
 
   router.get('/', async (req, res) => {
@@ -73,18 +35,8 @@ export function createScheduleRouter({ database, standalone = false }) {
       });
     }
 
-    const result = await database.query(
-      `${scheduleSelect}
-        JOIN courses AS course ON course.id = entry.course_id
-        WHERE entry.course_id = $1
-          AND course.start_date <= $2::date
-          AND course.end_date >= $2::date
-          AND entry.valid_from <= $2
-          AND (entry.valid_until IS NULL OR entry.valid_until > $2)
-        ORDER BY entry.weekday, entry.start_time, entry.id`,
-      [courseId, date],
-    );
-    return res.json({ schedule: result.rows });
+    const schedule = await repositories.schedule.list(courseId, date);
+    return res.json({ schedule });
   });
 
   router.post('/', async (req, res) => {
@@ -102,24 +54,21 @@ export function createScheduleRouter({ database, standalone = false }) {
       });
     }
 
-    const courseResult = await database.query(
-      'SELECT start_date::text AS "startDate" FROM courses WHERE id = $1',
-      [courseId],
-    );
-    if (!courseResult.rowCount) {
+    const validFrom = await repositories.courses.findStartDate(courseId);
+    if (!validFrom) {
       return res.status(404).json({
         error: { code: 'COURSE_NOT_FOUND', message: 'Course not found.' },
       });
     }
 
-    const entry = await createEntry(database, {
+    const entry = await repositories.schedule.create({
       courseId,
       subjectId: String(subjectId),
       teacherId: teacherId == null ? null : String(teacherId),
       weekday,
       startTime,
       endTime,
-      validFrom: courseResult.rows[0].startDate,
+      validFrom,
     });
     return res.status(201).json({ scheduleEntry: entry });
   });
@@ -144,64 +93,11 @@ export function createScheduleRouter({ database, standalone = false }) {
       });
     }
 
-    const result = await withTransaction(database, async (client) => {
-      const existingResult = await client.query(
-        `SELECT id, course_id AS "courseId", subject_id AS "subjectId",
-                teacher_id AS "teacherId", weekday, start_time AS "startTime",
-                end_time AS "endTime", valid_from AS "validFrom",
-                valid_until AS "validUntil"
-           FROM schedule_entries
-          WHERE id = $1
-          FOR UPDATE`,
-        [entryId],
-      );
-      const existing = existingResult.rows[0];
-      if (!existing) {
-        return null;
-      }
-
-      const replacement = {
-        subjectId: subjectId === undefined ? String(existing.subjectId) : String(subjectId),
-        teacherId: teacherId === undefined ? existing.teacherId : teacherId,
-        weekday: weekday === undefined ? existing.weekday : weekday,
-        startTime: startTime === undefined ? existing.startTime : startTime,
-        endTime: endTime === undefined ? existing.endTime : endTime,
-      };
-      if (
-        existing.validUntil !== null
-        || validUntil <= existing.validFrom
-        || !validEntry(replacement)
-      ) {
-        return { invalid: true };
-      }
-
-      const closeResult = await client.query(
-        `UPDATE schedule_entries
-            SET valid_until = $1
-          WHERE id = $2
-          RETURNING id`,
-        [validUntil, entryId],
-      );
-      const replacementResult = await client.query(
-        `INSERT INTO schedule_entries
-           (course_id, subject_id, teacher_id, weekday, start_time, end_time, valid_from)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, course_id AS "courseId", subject_id AS "subjectId",
-                   teacher_id AS "teacherId", weekday,
-                   start_time AS "startTime", end_time AS "endTime",
-                   valid_from AS "validFrom", valid_until AS "validUntil"`,
-        [
-          existing.courseId,
-          replacement.subjectId,
-          replacement.teacherId,
-          replacement.weekday,
-          replacement.startTime,
-          replacement.endTime,
-          validUntil,
-        ],
-      );
-      return { closedId: closeResult.rows[0].id, replacement: replacementResult.rows[0] };
-    });
+    const result = await repositories.schedule.change(
+      entryId,
+      { validUntil, subjectId, teacherId, weekday, startTime, endTime },
+      validEntry,
+    );
 
     if (!result) {
       return res.status(404).json({ error: { code: 'SCHEDULE_ENTRY_NOT_FOUND', message: 'Schedule entry not found.' } });
@@ -223,14 +119,8 @@ export function createScheduleRouter({ database, standalone = false }) {
       });
     }
 
-    const result = await database.query(
-      `UPDATE schedule_entries
-          SET valid_until = $1
-        WHERE id = $2 AND valid_until IS NULL AND valid_from < $1
-        RETURNING id`,
-      [validUntil, entryId],
-    );
-    if (!result.rowCount) {
+    const closed = await repositories.schedule.close(entryId, validUntil);
+    if (!closed) {
       return res.status(404).json({ error: { code: 'SCHEDULE_ENTRY_NOT_FOUND', message: 'An active schedule entry with an earlier start date was not found.' } });
     }
     return res.status(204).send();
@@ -244,26 +134,7 @@ export function createScheduleRouter({ database, standalone = false }) {
       });
     }
 
-    const result = await withTransaction(database, async (client) => {
-      const entryResult = await client.query(
-        'SELECT id FROM schedule_entries WHERE id = $1 FOR UPDATE',
-        [entryId],
-      );
-      if (!entryResult.rowCount) return null;
-
-      const attendanceResult = await client.query(
-        `SELECT EXISTS (
-           SELECT 1 FROM attendance WHERE schedule_entry_id = $1
-         ) AS "hasAttendance"`,
-        [entryId],
-      );
-      if (attendanceResult.rows[0].hasAttendance) {
-        return { hasAttendance: true };
-      }
-
-      await client.query('DELETE FROM schedule_entries WHERE id = $1', [entryId]);
-      return { deleted: true };
-    });
+    const result = await repositories.schedule.deletePermanently(entryId);
 
     if (!result) {
       return res.status(404).json({
