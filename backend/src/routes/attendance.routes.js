@@ -37,6 +37,15 @@ function futureAttendanceError(res) {
   });
 }
 
+function nonTeachingDayError(res) {
+  return res.status(409).json({
+    error: {
+      code: 'ATTENDANCE_ON_NON_TEACHING_DAY',
+      message: 'Attendance cannot be changed on a non-teaching day.',
+    },
+  });
+}
+
 export function createAttendanceRouter({ repositories }) {
   const router = Router();
 
@@ -65,6 +74,9 @@ export function createAttendanceRouter({ repositories }) {
       });
     }
     if (!scheduleEntry.isScheduled) return invalidAttendanceDate(res);
+    if (await repositories.nonTeachingDays.includes(scheduleEntry.academicYear, date)) {
+      return nonTeachingDayError(res);
+    }
 
     const attendance = await repositories.attendance.save({
       entryId,
@@ -93,6 +105,9 @@ export function createAttendanceRouter({ repositories }) {
       });
     }
     if (!scheduleEntry.isScheduled) return invalidAttendanceDate(res);
+    if (await repositories.nonTeachingDays.includes(scheduleEntry.academicYear, date)) {
+      return nonTeachingDayError(res);
+    }
 
     await repositories.attendance.delete(entryId, date);
     return res.status(204).send();

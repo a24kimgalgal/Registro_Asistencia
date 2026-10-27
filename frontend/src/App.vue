@@ -44,10 +44,10 @@ const selectedCourse = computed(() => courses.value.find(
   (course) => String(course.id) === String(selectedCourseId.value),
 ));
 const earliestMonth = computed(() => selectedCourse.value
-  ? startOfMonth(new Date(`${selectedCourse.value.startDate}T00:00:00`))
+  ? startOfMonth(courseDate(selectedCourse.value.startDate))
   : addMonths(currentMonth, -6));
 const latestMonth = computed(() => selectedCourse.value
-  ? startOfMonth(new Date(`${selectedCourse.value.endDate}T00:00:00`))
+  ? startOfMonth(courseDate(selectedCourse.value.endDate))
   : addMonths(currentMonth, 5));
 const canGoToPreviousMonth = computed(() => displayedMonth.value > earliestMonth.value);
 const canGoToNextMonth = computed(() => displayedMonth.value < latestMonth.value);
@@ -73,6 +73,7 @@ const weeklySchedule = computed(() => weekdays.map((label, index) => ({
 const calendarDays = computed(() => {
   const firstOfMonth = displayedMonth.value;
   const lastOfMonth = new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() + 1, 0);
+  const todayKey = dateKey(new Date());
   const mondayOffset = (firstOfMonth.getDay() + 6) % 7;
   const start = new Date(firstOfMonth);
   start.setDate(firstOfMonth.getDate() - mondayOffset);
@@ -88,6 +89,9 @@ const calendarDays = computed(() => {
         key: dateKey(date),
         number: date.getDate(),
         inMonth: date.getMonth() === firstOfMonth.getMonth(),
+        isToday: dateKey(date) === todayKey,
+        isPast: dateKey(date) < todayKey,
+        isFuture: dateKey(date) > todayKey,
         accessibleDate: new Intl.DateTimeFormat('es-ES', {
           weekday: 'long',
           day: 'numeric',
@@ -120,13 +124,19 @@ function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function courseDate(value) {
+  return new Date(`${String(value).slice(0, 10)}T00:00:00`);
+}
+
 function changeMonth(amount) {
   const nextMonth = addMonths(displayedMonth.value, amount);
   if (nextMonth < earliestMonth.value || nextMonth > latestMonth.value) return;
   displayedMonth.value = nextMonth;
   const isCourseStartMonth = selectedCourse.value
-    && dateKey(nextMonth).slice(0, 7) === selectedCourse.value.startDate.slice(0, 7);
-  selectedDate.value = isCourseStartMonth ? selectedCourse.value.startDate : dateKey(nextMonth);
+    && dateKey(nextMonth).slice(0, 7) === String(selectedCourse.value.startDate).slice(0, 7);
+  selectedDate.value = isCourseStartMonth
+    ? String(selectedCourse.value.startDate).slice(0, 10)
+    : dateKey(nextMonth);
   loadCourseData();
 }
 
@@ -141,8 +151,10 @@ function goToToday() {
 
 function clampDate(date, startDate, endDate) {
   const dateKeyValue = dateKey(date);
-  if (dateKeyValue < startDate) return new Date(`${startDate}T00:00:00`);
-  if (dateKeyValue > endDate) return new Date(`${endDate}T00:00:00`);
+  const startDateKey = String(startDate).slice(0, 10);
+  const endDateKey = String(endDate).slice(0, 10);
+  if (dateKeyValue < startDateKey) return courseDate(startDateKey);
+  if (dateKeyValue > endDateKey) return courseDate(endDateKey);
   return date;
 }
 
@@ -254,7 +266,10 @@ function navigateTo(section) {
 function selectDate(date) {
   if (
     selectedCourse.value
-    && (date < selectedCourse.value.startDate || date > selectedCourse.value.endDate)
+    && (
+      date < String(selectedCourse.value.startDate).slice(0, 10)
+      || date > String(selectedCourse.value.endDate).slice(0, 10)
+    )
   ) return;
   selectedDate.value = date;
   selectedClass.value = null;
@@ -341,6 +356,36 @@ async function quickMarkAttendance(classEntry, status) {
     );
     await loadCourseData();
     actionMessage.value = `Asistencia guardada: ${statusLabel(status).toLowerCase()}.`;
+  } catch (error) {
+    dataError.value = error.message;
+  } finally {
+    savingAttendance.value = false;
+  }
+}
+
+async function markDayPresent() {
+  const classesToMark = selectedDateClasses.value.filter(
+    (classEntry) => classEntry.status !== 'present',
+  );
+  if (!classesToMark.length || isFutureDate(selectedDate.value)) return;
+
+  savingAttendance.value = true;
+  dataError.value = '';
+  actionMessage.value = '';
+  try {
+    const results = await Promise.allSettled(classesToMark.map((classEntry) => apiRequest(
+      `/schedule/${classEntry.scheduleEntryId}/attendance/${classEntry.classDate}`,
+      {
+        method: 'PUT',
+        body: jsonBody({ status: 'present' }),
+      },
+    )));
+    await loadCourseData();
+    const failedRequest = results.find((result) => result.status === 'rejected');
+    if (failedRequest) {
+      throw new Error(`No se pudieron marcar todas las clases del día. ${failedRequest.reason.message}`);
+    }
+    actionMessage.value = 'Asistencia guardada: todas las clases del día marcadas como presentes.';
   } catch (error) {
     dataError.value = error.message;
   } finally {
@@ -487,7 +532,11 @@ onMounted(() => {
             <section class="calendar-section" aria-labelledby="calendar-heading">
               <div class="section-heading calendar-section-heading">
                 <h2 id="calendar-heading">Clases de {{ monthTitle }}</h2>
-                <span class="weekday-note">De lunes a viernes</span>
+                <div class="calendar-date-legend" aria-label="Referencias de fechas">
+                  <span><i class="calendar-date-marker calendar-date-marker--past" aria-hidden="true"></i>Día pasado</span>
+                  <span><i class="calendar-date-marker calendar-date-marker--today" aria-hidden="true"></i>Hoy</span>
+                  <span><i class="calendar-date-marker calendar-date-marker--future" aria-hidden="true"></i>Fecha futura · solo consulta</span>
+                </div>
               </div>
 
               <p v-if="loadingData" class="data-feedback" role="status">Cargando clases…</p>
@@ -514,13 +563,18 @@ onMounted(() => {
                     class="calendar-day"
                     :class="{ 'calendar-day--outside': !day.inMonth }"
                     role="gridcell"
-                    :aria-label="`${day.accessibleDate}${day.inMonth ? '' : ', fuera del mes seleccionado'}`"
+                    :aria-label="`${day.accessibleDate}${day.isToday ? ', hoy' : ''}${day.isFuture ? ', fecha futura, solo consulta' : ''}${day.inMonth ? '' : ', fuera del mes seleccionado'}`"
                   >
                     <button
                       class="calendar-day-button"
-                      :class="{ 'calendar-day-button--selected': selectedDate === day.key }"
+                      :class="{
+                        'calendar-day-button--selected': selectedDate === day.key,
+                        'calendar-day-button--today': day.isToday,
+                        'calendar-day-button--past': day.isPast,
+                        'calendar-day-button--future': day.isFuture,
+                      }"
                       type="button"
-                      :disabled="selectedCourse && (day.key < selectedCourse.startDate || day.key > selectedCourse.endDate)"
+                      :disabled="selectedCourse && (day.key < String(selectedCourse.startDate).slice(0, 10) || day.key > String(selectedCourse.endDate).slice(0, 10))"
                       :aria-pressed="selectedDate === day.key"
                       @click="selectDate(day.key)"
                     >
@@ -570,6 +624,16 @@ onMounted(() => {
                   <h3>{{ formatCalendarDate(selectedDate) }}</h3>
                   <div class="selected-day-actions">
                     <span class="weekday-note">{{ selectedDateClasses.length }} clases</span>
+                    <v-btn
+                      v-if="selectedDateClasses.length"
+                      color="primary"
+                      variant="outlined"
+                      rounded="lg"
+                      :disabled="savingAttendance || isFutureDate(selectedDate) || selectedDateClasses.every((classEntry) => classEntry.status === 'present')"
+                      @click="markDayPresent"
+                    >
+                      Marcar todo el día como presente
+                    </v-btn>
                     <v-btn
                       color="primary"
                       variant="tonal"
@@ -684,8 +748,8 @@ onMounted(() => {
               <input
                 v-model="selectedDate"
                 type="date"
-                :min="selectedCourse.startDate"
-                :max="selectedCourse.endDate"
+                :min="String(selectedCourse.startDate).slice(0, 10)"
+                :max="String(selectedCourse.endDate).slice(0, 10)"
                 @change="selectDate(selectedDate)"
               >
             </label>
@@ -772,7 +836,12 @@ onMounted(() => {
             <div v-if="selectedCourse" class="weekly-grid">
               <section v-for="day in weeklySchedule" :key="day.weekday" class="weekly-day">
                 <h3>{{ day.label }}</h3>
-                <article v-for="entry in day.entries" :key="entry.id" class="weekly-entry">
+                <article
+                  v-for="entry in day.entries"
+                  :key="entry.id"
+                  class="weekly-entry"
+                  :style="{ '--subject-color': entry.subjectColor || '#385e52' }"
+                >
                   <strong>{{ formatTime(entry.startTime) }}–{{ formatTime(entry.endTime) }}</strong>
                   <span>{{ entry.subjectName }}</span>
                   <small>{{ entry.teacherName || 'Sin profesor asignado' }}</small>

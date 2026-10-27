@@ -1,10 +1,47 @@
 # PROJECT_STATE
 
+## Festivos y días no lectivos del curso 2026-2027
+
+Según el calendario del Institut, las casillas azules corresponden a “Festus, dies lliure disposició i vacances”. Se incluyen todas las fechas confirmadas por el usuario de lunes a viernes; las fechas de fin de semana quedan excluidas. La migración `005_non_teaching_days.sql` ya se aplicó al PostgreSQL local el 27/10/2026: quedan almacenadas las 28 fechas festivas y se instaló la protección de asistencia en la base de datos.
+
+| Mes | Fechas entre semana |
+|---|---|
+| Septiembre 2026 | 11, 24 |
+| Octubre 2026 | 12, 30 |
+| Noviembre 2026 | Ninguna |
+| Diciembre 2026 | 7, 8, 22, 23, 24, 25, 28, 29, 30, 31 |
+| Enero 2027 | 1, 4, 5, 6, 7 |
+| Febrero 2027 | 8 |
+| Marzo 2027 | 22, 23, 24, 25, 26, 29 |
+| Abril 2027 | Ninguna |
+| Mayo 2027 | 14, 17 |
+| Junio 2027 | Ninguna |
+
+**Criterio para la futura incorporación:** usar exclusivamente estas fechas de lunes a viernes confirmadas por el usuario; no añadir fechas de fin de semana ni deducir otros festivos.
+
+### Implementación de festivos
+
+El usuario autorizó preparar el almacenamiento persistente. La migración ya está aplicada y el contrato Backend está implementado; quedan reconstruir el contenedor e integrar la presentación en Frontend/Diseño.
+
+- **Diseño UX/UI:** definir cómo se identifican los días festivos en el calendario y en el detalle del día, y qué mensaje/estado se muestra para que no se confundan con días lectivos sin asistencia registrada. Mantener la vista de lunes a viernes y no proponer cambios ajenos a esta función.
+- **Base de Datos — implementado y aplicado:** `non_teaching_days(academic_year, day_date)` usa clave primaria compuesta y una restricción que excluye sábados y domingos. La migración carga las 28 fechas confirmadas para `2026-2027` e instala un trigger que rechaza asistencia creada/actualizada directamente en PostgreSQL en un festivo. Tras la confirmación explícita del usuario, eliminó únicamente los seis registros verificados: IDs 67–70 del 24/09 y 116–117 del 12/10 (todos `present`). Se comprobaron 28 festivos, cero asistencias en festivos y cero filas restantes con esos IDs; quedan 104 asistencias en total.
+- **Backend — implementado:** `backend/src/repositories/non-teaching-days.js` consulta PostgreSQL. La respuesta mensual incluye `nonTeachingDays` y la consulta excluye esos días de las clases generadas. PUT y DELETE de asistencia rechazan estas fechas con `409 ATTENDANCE_ON_NON_TEACHING_DAY`.
+- **Contenedor Backend — pendiente de reconstruir:** el servicio sigue ejecutando una imagen anterior que no devuelve `nonTeachingDays`; la reconstrucción falló al descargar `node:24-alpine` por timeout TLS con Docker Hub. La base de datos ya impide insertar asistencias en festivos, aunque la imagen anterior presenta su error genérico. El código local del Backend pasa 33 pruebas; volver a construir la imagen cuando Docker Hub responda.
+- **Datos en conflicto resueltos con autorización del usuario:** se eliminaron las cuatro asistencias del 24/09/2026 (Entorn de Servidor 08:00–09:00 y 09:00–10:00; Projecte 10:00–11:00 y 11:30–12:30) y las dos del 12/10/2026 (Tutoria 10:00–11:00; Entorn de Client 11:30–12:30). La primera ejecución detectó el conflicto y revirtió todos sus cambios; tras la autorización del usuario se ajustó la migración con precondiciones exactas y se aplicó correctamente. Todas las demás asistencias se conservaron.
+- **Frontend:** consumir los días no lectivos de la API y mostrarlos según el diseño acordado; evitar que el usuario registre asistencia en ellos y conservar la navegación y el resto del comportamiento del calendario.
+- **QA/Testing:** cubrir fechas festivas pasadas y futuras, días lectivos normales, exclusión de sábados y domingos y bloqueo de asistencia en días no lectivos; verificar que los datos actuales de asistencia no se alteran.
+
+**Orden restante:** reconstruir el contenedor Backend cuando Docker Hub permita descargar la imagen base; Diseño define la presentación; Frontend consume `nonTeachingDays` y bloquea los controles con una explicación accesible; QA cubre la experiencia y confirma que no se alteran datos.
+
 ## Estado Actual
 
 **Hallazgo frontend (22/10/2026):** la API puede devolver `classDate` con la hora incluida, por ejemplo `2026-10-22T00:00:00.000Z`. La interfaz comparaba ese valor directamente con la fecha seleccionada (`2026-10-22`), por lo que el horario semanal mostraba clases pero el bloque del día no las encontraba. Frontend normaliza el valor a `YYYY-MM-DD` antes de agrupar y filtrar clases.
 
 Implementación inicial utilizable. El backend Express ofrece cursos, materias, profesores, asignaciones semanales, consulta mensual y registro individual de asistencia. No existe una página separada de “clases del día”: dentro de Horario, el bloque “Clases del [día]” usa la consulta mensual para mostrar las clases de la fecha seleccionada y sus controles de asistencia. La plantilla semanal inferior es una referencia recurrente separada. Frontend selecciona hoy al abrir un curso vigente y permite navegar todos los meses dentro del período del curso; sin curso seleccionado, ofrece una ventana de doce meses. Se pueden elegir fechas del curso; las futuras son solo de consulta. Las solicitudes antiguas se descartan si cambia rápidamente el curso o la fecha. **Problema de datos pendiente, verificado en PostgreSQL local:** el curso `1` (`2 DAW`) va del `2026-09-14` al `2027-06-15`. Hay 14 asignaciones activas iniciales con `valid_from = 2026-10-22`; por eso la consulta mensual no genera sus clases entre el inicio del curso y el 21/10. El usuario confirma que estas asignaciones iniciales deben cubrir el curso completo. Las filas cerradas y sus versiones de reemplazo tienen fechas posteriores y deben conservarse.
+
+**Incidencia de horario semanal comunicada por el usuario (26/10/2026):** el usuario no veía en el horario semanal de `2 DAW` las asignaciones de lunes 10:00–11:00 Tutoría; martes 10:00–11:00 y 11:30–12:30 Projecte; y miércoles 10:00–11:00 Entorn de Client. Verificación backend en PostgreSQL y API local (26/10): las cuatro asignaciones existen y la consulta para el curso `1`, fecha `2026-10-26`, las devuelve activas con día y horas correctos; no se añadieron filas de horario. La API semanal omitía `subjects.color`; se corrigió para incluirlo como `subjectColor`. Frontend se verificó con la API y el contenedor local actualizado: el horario muestra las asignaciones de los cinco días, incluidas las cuatro indicadas, y aplica el color de cada materia. No se pudo reproducir el problema de clases ausentes después de actualizar el entorno local; la causa histórica de esa percepción queda sin determinar. IPO II existe en el catálogo local, pero el usuario confirma que no la cursa: no crear ni restaurar asignaciones para IPO II a partir de la captura. En la sección Horario, las materias deben mostrarse con los colores guardados al crearlas (`subjects.color`), sin una paleta arbitraria.
+
+**Incidencia calendario (26/10/2026):** los recuentos de días previos a la incorporación de cuatro franjas no coincidían con el horario semanal actual. Diagnóstico en PostgreSQL: no era pérdida de registros de asistencia ni un recuento aleatorio de Frontend. Las cuatro franjas se añadieron inicialmente con `valid_from = 2026-10-22`; sus reemplazos por cambio de profesor comienzan el 23/24 de octubre. El usuario confirmó que esas clases debían contar desde el inicio del curso (`2026-09-14`); la migración 004 retrofecha solo las cuatro versiones originales y conserva las fechas de sustitución, para reflejar el horario histórico esperado. Las cuatro filas objetivo no tenían asistencias; la migración no modifica registros de asistencia. Se detectó además un bug independiente de navegación mensual: la API entrega `startDate`/`endDate` como timestamp ISO, pero Frontend les añadía otro sufijo `T00:00:00`, obteniendo fechas inválidas y deshabilitando los botones anterior/siguiente. Corregido y verificado.
 
 En Administración, la fecha técnica `validFrom` ya no se pide al crear una asignación. El backend la toma del inicio del curso; al cambiar una asignación, la versión nueva empieza en la fecha efectiva del cambio y la anterior conserva su vigencia. Los cursos finalizados no admiten nuevas asignaciones. Cerrar una asignación termina su vigencia conservando el historial; Borrar elimina solo asignaciones que no tienen asistencias. Las materias sin horario se eliminan y las ya usadas en horarios se desactivan para preservar el historial.
 
@@ -98,6 +135,36 @@ Socket.io no está implementado ni es necesario para el uso individual básico; 
 
 El flujo deseado es sencillo: crear curso y materias, asignar profesor/día/hora sin introducir fechas técnicas, elegir la fecha en Horario y marcar cada clase de ese día como presente, falta o retardo. Calendario debe reflejar el estado individual de cada clase. Crear un curso o materia no debe generar clases automáticamente, y una clase sin registro sigue pendiente, no es una falta. Una asignación creada por error debe poder borrarse sin eliminar historial silenciosamente.
 
+### Incidencia: asignaciones ausentes y colores en Horario
+
+**Objetivo:** corregir las asignaciones semanales que el usuario reporta como ausentes para `2 DAW` y mostrar en el horario semanal el color configurado para cada materia. No inferir que la migración sea la causa hasta comparar los datos, la API y la interfaz.
+
+#### Backend — verificar datos y contrato de horario
+
+- **Verificado en PostgreSQL y API local:** las cuatro asignaciones reportadas ya existen con días/horas correctos y la API devuelve las filas activas para `2 DAW`; no insertar ni cambiar asignaciones en la base.
+- **Corregido en Backend:** la consulta semanal devuelve `subjects.color` como `subjectColor`; una prueba verifica tanto el campo SQL como su presencia en la respuesta JSON.
+- No crear IPO2 ni asumir cambios de datos sin verificar el estado real y respetar la lista explícita del usuario.
+
+#### Frontend — mostrar el horario y colores recibidos
+
+- **Implementado:** la sección Horario conserva la petición con curso/fecha seleccionados y renderiza cada asignación semanal recibida, incluida cada franja del martes cuando hay dos.
+- **Implementado:** las tarjetas usan `subjectColor` para su borde y un fondo tintado; mantienen texto oscuro para el contraste y color de borde alternativo cuando la API no envía color.
+- **Probado:** Vitest verifica las cuatro asignaciones reportadas, las dos horas del martes, la petición del curso/fecha actual y el color recibido por cada tarjeta. IPO II no se añade ni se muestra a menos que venga configurada como asignación desde la API.
+
+#### Diseño UX/UI — legibilidad y asociación materia/color
+
+- **Implementado:** se distingue visualmente cada materia mediante su color persistido en el borde/fondo tintado, conservando texto oscuro para la lectura.
+- **Implementado:** materias sin color usan una alternativa neutra y mantienen nombre, franja y profesor como información textual; el color no es la única fuente de identificación.
+
+**Aceptación compartida:** la API y la pantalla local de Horario reflejan las asignaciones verificadas para los días y horas indicados; las tarjetas muestran el color persistido de su materia de forma legible; IPO2 no aparece ni se añade. La API ya incluía las cuatro asignaciones; la omisión del color en su respuesta semanal se corrigió en Backend. La anterior ausencia visual no se reproduce tras actualizar el frontend local, por lo que su causa original queda sin determinar.
+
+### Calendario: recuento histórico y navegación mensual
+
+- **Recuento histórico corregido tras confirmación del usuario:** las cuatro franjas iniciales añadidas el 22/10 deben contar desde el 14/09/2026. La migración 004 amplía la vigencia de las filas originales (IDs `1, 5, 6, 20`) hasta el inicio del curso; mantiene vigencias de reemplazos (IDs `27, 7, 8, 21`) desde 24/10 y 23/10, respectivamente. En días lectivos previos al 22/10 se generan 2 clases el lunes, 4 el martes, miércoles, jueves y viernes: las 18 franjas semanales indicadas.
+- **Frontend corregido:** las fechas ISO de inicio/fin del curso se normalizan a `YYYY-MM-DD` antes de crear fechas locales, comparar límites, seleccionar fechas o fijar `min`/`max`. El sufijo duplicado causaba fechas inválidas y dejaba deshabilitados los controles mensual anterior/siguiente.
+- **Verificado en navegador y pruebas:** desde Calendario se navega de octubre a septiembre, vuelve a octubre y avanza a noviembre; los límites del curso mantienen deshabilitados solo los meses fuera del período. No era necesario reiniciar PostgreSQL ni modificar datos; se reconstruyó el frontend local para cargar la corrección.
+- **Migración aplicada y validada en PostgreSQL local:** `004_backdate_added_schedule_entries.sql` ajusta las cuatro franjas confirmadas, preserva las 26 asistencias existentes y deja intactas las fechas efectivas de los reemplazos por profesor. La API mensual devuelve 46 clases en septiembre, 80 en octubre y 74 en noviembre de 2026.
+
 ### Asistencia retrospectiva desde el inicio del curso
 
 **Objetivo:** poder completar o corregir la asistencia de cualquier clase pasada del curso, aunque la materia y su horario se hayan añadido después de que empezara el curso; nunca permitir registrar, corregir o quitar asistencia de fechas posteriores a hoy.
@@ -107,10 +174,10 @@ El flujo deseado es sencillo: crear curso y materias, asignar profesor/día/hora
 - **Implementado en Frontend:** abrir Horario en hoy, seleccionar fechas dentro del curso, navegar todo el período (aunque supere doce meses) y bloquear cambios de asistencia para fechas futuras.
 - **Decisión del usuario:** las asignaciones actuales creadas desde Administración como vigentes el 22/10/2026 deben considerarse activas desde `courses.start_date` hasta `courses.end_date`. Así se podrán consultar y registrar sus clases pasadas desde el comienzo del curso.
 - **Migración creada:** `backend/database/migrations/003_backdate_initial_schedule_entries.sql` ajusta `valid_from` de las 14 asignaciones activas iniciales del curso `1` desde `2026-10-22` a `courses.start_date` (`2026-09-14`). IDs verificados en la base local: `2, 3, 4, 14, 15, 16, 17, 18, 19, 22, 23, 24, 25, 26`. Mantiene `valid_until IS NULL`: la consulta mensual/semanal ya limita las clases a `courses.end_date` inclusivamente; fijar `valid_until` al fin del curso cerraría el horario y complicaría su edición antes de acabar el curso.
-- No modificar las filas cerradas `1, 5, 6, 20` ni las versiones de reemplazo `7, 8, 21, 27`: representan cambios de horario con vigencias reales del 23/10 o posteriores. Tampoco ampliar las vigencias de otras asignaciones activas creadas después del 22/10.
+- La migración 003 no alteró las filas cerradas `1, 5, 6, 20` ni sus reemplazos `7, 8, 21, 27`. Por decisión posterior del usuario, la migración 004 retrofecha únicamente las filas originales `1, 5, 6, 20`; conserva las fechas efectivas de sus reemplazos (`27` desde 24/10 y `7, 8, 21` desde 23/10), sin ampliar otras asignaciones.
 - La restricción de exclusión de solapamientos se comprobó en modo de simulación para las 14 filas candidatas y no mostró conflictos. La migración debe mantener comprobación/rollback y fallar de forma explícita si los datos reales no coinciden con sus precondiciones.
 - El trigger `schedule_entries_validate_change` prohíbe modificar `valid_from`. La migración debe deshabilitar temporalmente solo ese trigger dentro de una transacción, actualizar únicamente los IDs verificados con condiciones de curso, fecha inicial y `valid_until IS NULL`, y volver a habilitarlo antes del commit. No quitar permanentemente la protección de inmutabilidad.
-- `docker-compose.yml` monta los SQL de migración en `/docker-entrypoint-initdb.d`; PostgreSQL solo ejecuta esa carpeta al inicializar un volumen vacío. `003` está montada y valida los datos antes de cambiarlos; no-op si el curso local `1` no existe. En volúmenes existentes hay que ejecutarla explícitamente con `ON_ERROR_STOP`. No hay tabla de historial de migraciones actualmente.
+- `docker-compose.yml` monta los SQL de migración en `/docker-entrypoint-initdb.d`; PostgreSQL solo ejecuta esa carpeta al inicializar un volumen vacío. `003` y `004` validan los datos antes de cambiarlos y no actualizan filas si no están los datos esperados del curso local `1`. En volúmenes existentes hay que ejecutar las nuevas migraciones explícitamente con `ON_ERROR_STOP`. No hay tabla de historial de migraciones actualmente.
 - La consulta mensual ya limita sus resultados al período del curso y `valid_until` permanece como límite histórico cuando una asignación se cierra o reemplaza. Conservar ese comportamiento.
 - **Pruebas implementadas:** nueva asignación en un curso iniciado usa la fecha inicial; asistencia pasada válida; fechas futuras rechazadas al guardar y borrar; fechas no programadas o fuera de vigencia rechazadas.
 - **Migración creada:** comprueba curso, IDs, fechas y vigencias; deshabilita/re-habilita únicamente el trigger de inmutabilidad dentro de una transacción, mantiene activa la restricción de no solapamiento y no altera asignaciones cerradas ni reemplazos. Antes de ejecutarla en otra base, verificar los IDs/datos: los identificadores consultados corresponden al volumen PostgreSQL local actual.
@@ -120,7 +187,7 @@ El flujo deseado es sencillo: crear curso y materias, asignar profesor/día/hora
 
 #### Diseño UX/UI — experiencia de asistencia retrospectiva
 
-- Definir cómo elegir fechas pasadas dentro del período del curso y cómo distinguir visualmente días pasados, hoy y fechas futuras.
+- **Implementado:** el calendario diferencia los días pasados, hoy y futuros con estilos distintos y una leyenda textual; la celda comunica también el estado al lector de pantalla.
 - Mostrar con claridad que las fechas futuras se pueden consultar, pero no editar; proponer un mensaje breve y accesible para los controles deshabilitados.
 - Mantener un recorrido simple para llegar desde el calendario mensual a las clases del día, incluyendo cursos que duren más de doce meses.
 - No cambiar contratos de API ni reglas de vigencia; documentar la propuesta visual para Frontend.

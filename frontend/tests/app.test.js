@@ -40,6 +40,71 @@ describe('initial calendar screen', () => {
     wrapper.unmount();
   });
 
+  it('visually identifies today and future dates in the calendar', async () => {
+    const today = new Date();
+    const dateKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const todayKey = dateKey(today);
+    const nextWeekday = new Date(today);
+    do {
+      nextWeekday.setDate(nextWeekday.getDate() + 1);
+    } while (nextWeekday.getDay() === 0 || nextWeekday.getDay() === 6);
+    const futureKey = dateKey(nextWeekday);
+    fetch.mockImplementation(async (url) => {
+      if (url.endsWith('/health')) return response({ status: 'ok', database: 'connected' });
+      if (url.endsWith('/courses')) {
+        return response({
+          courses: [{
+            id: '4',
+            name: '2 DAW',
+            academicYear: '2026-2027',
+            startDate: `${today.getFullYear()}-01-01`,
+            endDate: `${today.getFullYear() + 1}-12-31`,
+            isCurrent: true,
+          }],
+        });
+      }
+      if (url.includes('/month?')) return response({ classes: [] });
+      if (url.includes('/schedule?')) return response({ schedule: [] });
+      if (url.endsWith('/subjects')) return response({ subjects: [] });
+      return response({});
+    });
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), createVuetify()],
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('.calendar-date-legend').text()).toContain('Día pasado');
+    expect(wrapper.find('.calendar-date-legend').text()).toContain('Hoy');
+    expect(wrapper.find('.calendar-date-legend').text()).toContain('Fecha futura · solo consulta');
+    const futureButton = wrapper.findAll('.calendar-day-button')
+      .find((button) => button.get('time').attributes('datetime') === futureKey);
+    expect(futureButton.classes()).toContain('calendar-day-button--future');
+    expect(futureButton.element.parentElement.getAttribute('aria-label'))
+      .toContain('fecha futura, solo consulta');
+    await futureButton.trigger('click');
+    expect(wrapper.find('.day-classes').text()).toContain('Puedes consultar este día');
+    expect(wrapper.find('.day-classes').text()).toContain('la asistencia solo se puede cambiar hasta hoy');
+
+    if (today.getDay() !== 0 && today.getDay() !== 6) {
+      const todayButton = wrapper.findAll('.calendar-day-button')
+        .find((button) => button.get('time').attributes('datetime') === todayKey);
+      expect(todayButton.classes()).toContain('calendar-day-button--today');
+      expect(todayButton.element.parentElement.getAttribute('aria-label')).toContain('hoy');
+    }
+    const previousWeekday = new Date(today);
+    do {
+      previousWeekday.setDate(previousWeekday.getDate() - 1);
+    } while (previousWeekday.getDay() === 0 || previousWeekday.getDay() === 6);
+    if (previousWeekday.getMonth() === today.getMonth()) {
+      const pastButton = wrapper.findAll('.calendar-day-button')
+        .find((button) => button.get('time').attributes('datetime') === dateKey(previousWeekday));
+      expect(pastButton.classes()).toContain('calendar-day-button--past');
+    }
+    wrapper.unmount();
+  });
+
   it('navigates through twelve months and returns to the current month', async () => {
     const wrapper = mount(App, {
       global: {
@@ -91,8 +156,8 @@ describe('initial calendar screen', () => {
       id: '4',
       name: 'Curso largo',
       academicYear: '2024-2027',
-      startDate: dateKey(courseStart),
-      endDate: dateKey(courseEnd),
+      startDate: `${dateKey(courseStart)}T00:00:00.000Z`,
+      endDate: `${dateKey(courseEnd)}T00:00:00.000Z`,
       isCurrent: true,
     };
     fetch.mockImplementation(async (url) => {
@@ -125,6 +190,8 @@ describe('initial calendar screen', () => {
       },
     });
     await flushPromises();
+    expect(wrapper.get('[aria-label="Mes anterior"]').element.disabled).toBe(false);
+    expect(wrapper.get('[aria-label="Mes siguiente"]').element.disabled).toBe(false);
 
     for (let month = 0; month < 15; month += 1) {
       await wrapper.get('[aria-label="Mes anterior"]').trigger('click');
@@ -153,8 +220,8 @@ describe('initial calendar screen', () => {
       .trigger('click');
     await flushPromises();
     const dateInput = wrapper.get('input[type="date"]');
-    expect(dateInput.attributes('min')).toBe(course.startDate);
-    expect(dateInput.attributes('max')).toBe(course.endDate);
+    expect(dateInput.attributes('min')).toBe(course.startDate.slice(0, 10));
+    expect(dateInput.attributes('max')).toBe(course.endDate.slice(0, 10));
     await dateInput.setValue(pastDate);
     await dateInput.trigger('change');
     await flushPromises();
@@ -335,6 +402,7 @@ describe('initial calendar screen', () => {
     expect(wrapper.get('input[type="date"]').element.value).toBe(classDate);
 
     expect(wrapper.findAll('.weekly-entry')).toHaveLength(1);
+    expect(wrapper.find('.weekly-entry').element.style.getPropertyValue('--subject-color')).toBe('#385e52');
     expect(wrapper.text()).toContain('09:00–10:00');
     expect(wrapper.text()).toContain('Ana Pérez');
     expect(wrapper.findAll('.day-class-card')).toHaveLength(1);
@@ -344,6 +412,94 @@ describe('initial calendar screen', () => {
     await wrapper.findAll('.primary-nav button').find((button) => button.text().trim() === 'Materias').trigger('click');
     expect(wrapper.findAll('.subject-card')).toHaveLength(1);
     expect(wrapper.text()).toContain('Programación');
+    wrapper.unmount();
+  });
+
+  it('shows reported weekly assignments with their saved subject colors', async () => {
+    const today = new Date();
+    const classDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const reportedEntries = [
+      {
+        id: '27',
+        weekday: 1,
+        subjectName: 'Tutoria',
+        subjectColor: '#d62e2e',
+        teacherName: 'Alvaro',
+        startTime: '10:00:00',
+        endTime: '11:00:00',
+      },
+      {
+        id: '7',
+        weekday: 2,
+        subjectName: 'Projecte',
+        subjectColor: '#f50fed',
+        teacherName: 'Pol',
+        startTime: '10:00:00',
+        endTime: '11:00:00',
+      },
+      {
+        id: '8',
+        weekday: 2,
+        subjectName: 'Projecte',
+        subjectColor: '#f50fed',
+        teacherName: 'Pol',
+        startTime: '11:30:00',
+        endTime: '12:30:00',
+      },
+      {
+        id: '21',
+        weekday: 3,
+        subjectName: 'Entorn de Client',
+        subjectColor: '#2af226',
+        teacherName: 'Alvaro',
+        startTime: '10:00:00',
+        endTime: '11:00:00',
+      },
+    ];
+    fetch.mockImplementation(async (url) => {
+      if (url.endsWith('/health')) return response({ status: 'ok', database: 'connected' });
+      if (url.endsWith('/courses')) {
+        return response({
+          courses: [{
+            id: '1',
+            name: '2 DAW',
+            academicYear: '2026-2027',
+            startDate: `${today.getFullYear()}-01-01`,
+            endDate: `${today.getFullYear()}-12-31`,
+            isCurrent: true,
+          }],
+        });
+      }
+      if (url.includes('/month?')) return response({ classes: [] });
+      if (url.includes('/schedule?')) return response({ schedule: reportedEntries });
+      if (url.endsWith('/subjects')) return response({ subjects: [] });
+      return response({});
+    });
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), createVuetify()],
+      },
+    });
+    await flushPromises();
+    await wrapper.findAll('.primary-nav button')
+      .find((button) => button.text().trim() === 'Horario')
+      .trigger('click');
+    await flushPromises();
+
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/v1/courses/1/schedule?date=${classDate}`,
+      expect.any(Object),
+    );
+    expect(wrapper.findAll('.weekly-entry')).toHaveLength(4);
+    for (const entry of reportedEntries) {
+      const card = wrapper.findAll('.weekly-entry')
+        .find((weeklyEntry) => weeklyEntry.text().includes(entry.subjectName)
+          && weeklyEntry.text().includes(entry.startTime.slice(0, 5)));
+      expect(card).toBeDefined();
+      expect(card.element.style.getPropertyValue('--subject-color')).toBe(entry.subjectColor);
+    }
+    expect(wrapper.find('.weekly-grid').text()).not.toContain('IPO');
     wrapper.unmount();
   });
 
@@ -512,6 +668,91 @@ describe('initial calendar screen', () => {
       .find((button) => button.text().trim() === 'Presente')
       .trigger('click');
     expect(fetch.mock.calls.some(([url, options]) => url.includes('/attendance/') && options?.method === 'PUT')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('marks every class of the selected calendar day as present', async () => {
+    const today = new Date();
+    const classDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const classEntries = [
+      {
+        scheduleEntryId: '12',
+        classDate,
+        subjectId: '5',
+        subjectName: 'Programación',
+        teacherName: 'Ana Pérez',
+        startTime: '09:00:00',
+        endTime: '10:00:00',
+        status: 'pending',
+        arrivedAt: null,
+        notes: null,
+      },
+      {
+        scheduleEntryId: '13',
+        classDate,
+        subjectId: '6',
+        subjectName: 'Bases de datos',
+        teacherName: 'Luis García',
+        startTime: '10:00:00',
+        endTime: '11:00:00',
+        status: 'absent',
+        arrivedAt: null,
+        notes: null,
+      },
+    ];
+    fetch.mockImplementation(async (url, options = {}) => {
+      if (url.endsWith('/health')) return response({ status: 'ok', database: 'connected' });
+      if (url.endsWith('/courses')) {
+        return response({
+          courses: [{
+            id: '4',
+            name: '2 DAW',
+            academicYear: '2026-2027',
+            startDate: `${today.getFullYear()}-01-01`,
+            endDate: `${today.getFullYear()}-12-31`,
+            isCurrent: true,
+          }],
+        });
+      }
+      if (url.includes('/month?')) return response({ classes: classEntries });
+      if (url.includes('/attendance/') && options.method === 'PUT') {
+        const entryId = url.match(/schedule\/(\d+)\/attendance/)[1];
+        classEntries.find((entry) => entry.scheduleEntryId === entryId).status = JSON.parse(options.body).status;
+        return response({ attendance: { status: 'present' } });
+      }
+      if (url.includes('/schedule?')) return response({ schedule: [] });
+      if (url.endsWith('/subjects')) return response({ subjects: [] });
+      return response({});
+    });
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), createVuetify()],
+      },
+    });
+    await flushPromises();
+
+    await wrapper.findAll('button')
+      .find((button) => button.text().trim() === 'Marcar todo el día como presente')
+      .trigger('click');
+    await flushPromises();
+
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/v1/schedule/12/attendance/${classDate}`,
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ status: 'present' }),
+      }),
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/v1/schedule/13/attendance/${classDate}`,
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ status: 'present' }),
+      }),
+    );
+    expect(wrapper.text()).toContain('todas las clases del día marcadas como presentes');
+    expect(wrapper.findAll('.day-class-card .attendance-status').every((status) => status.text() === 'Presente')).toBe(true);
     wrapper.unmount();
   });
 });

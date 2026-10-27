@@ -131,15 +131,27 @@ describe('Subject and teacher endpoints', () => {
 describe('Weekly schedule endpoints', () => {
   test('only returns schedule entries while their course is active', async () => {
     const database = {
-      query: jest.fn().mockResolvedValue({ rows: [] }),
+      query: jest.fn().mockResolvedValue({
+        rows: [{
+          id: '12',
+          subjectName: 'Tutoría',
+          subjectColor: '#d62e2e',
+        }],
+      }),
     };
     const response = await request(createTestApp(database))
       .get('/api/v1/courses/4/schedule?date=2026-10-22');
 
     expect(response.status).toBe(200);
+    expect(database.query.mock.calls[0][0]).toContain('subject.color AS "subjectColor"');
     expect(database.query.mock.calls[0][0]).toContain('course.start_date <= $2::date');
     expect(database.query.mock.calls[0][0]).toContain('course.end_date >= $2::date');
     expect(database.query.mock.calls[0][1]).toEqual(['4', '2026-10-22']);
+    expect(response.body.schedule).toEqual([{
+      id: '12',
+      subjectName: 'Tutoría',
+      subjectColor: '#d62e2e',
+    }]);
   });
 
   test('creates a class with its subject and teacher', async () => {

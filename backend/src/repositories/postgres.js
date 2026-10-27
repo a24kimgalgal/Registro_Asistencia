@@ -1,3 +1,5 @@
+import { createNonTeachingDaysRepository } from './non-teaching-days.js';
+
 async function withTransaction(database, callback) {
   if (typeof database.transaction === 'function') {
     return database.transaction(callback);
@@ -104,6 +106,17 @@ function createCoursesRepository(database) {
         [courseId],
       );
       return result.rows[0]?.startDate ?? null;
+    },
+
+    async findCalendarInfo(courseId) {
+      const result = await database.query(
+        `SELECT academic_year AS "academicYear",
+                start_date::text AS "startDate", end_date::text AS "endDate"
+           FROM courses
+          WHERE id = $1`,
+        [courseId],
+      );
+      return result.rows[0] ?? null;
     },
   };
 }
@@ -229,6 +242,7 @@ function createTeachersRepository(database) {
 const scheduleSelect = `
   SELECT entry.id, entry.course_id AS "courseId",
          entry.subject_id AS "subjectId", subject.name AS "subjectName",
+         subject.color AS "subjectColor",
          entry.teacher_id AS "teacherId", teacher.name AS "teacherName",
          entry.weekday, entry.start_time AS "startTime",
          entry.end_time AS "endTime", entry.valid_from AS "validFrom",
@@ -367,7 +381,8 @@ function createAttendanceRepository(database) {
   return {
     async findScheduleForDate(entryId, date) {
       const result = await database.query(
-        `SELECT entry.id,
+        `SELECT entry.id, course.id AS "courseId",
+                course.academic_year AS "academicYear",
                 ($2::date BETWEEN course.start_date AND course.end_date
                  AND $2::date >= entry.valid_from
                  AND (entry.valid_until IS NULL OR $2::date < entry.valid_until)
@@ -407,7 +422,7 @@ function createAttendanceRepository(database) {
 
 function createMonthlyClassesRepository(database) {
   return {
-    async list(courseId, monthStart) {
+    async list(courseId, monthStart, nonTeachingDays) {
       const result = await database.query(
         `SELECT entry.id AS "scheduleEntryId",
                 day.class_date::text AS "classDate",
@@ -438,8 +453,9 @@ function createMonthlyClassesRepository(database) {
              ON attendance.schedule_entry_id = entry.id
             AND attendance.class_date = day.class_date::date
           WHERE course.id = $1
+            AND NOT (day.class_date::date = ANY($3::date[]))
           ORDER BY day.class_date, entry.start_time, entry.id`,
-        [courseId, monthStart],
+        [courseId, monthStart, nonTeachingDays],
       );
       return result.rows;
     },
@@ -463,5 +479,6 @@ export function createPostgresRepositories(database) {
     schedule: createScheduleRepository(database),
     attendance: createAttendanceRepository(database),
     monthlyClasses: createMonthlyClassesRepository(database),
+    nonTeachingDays: createNonTeachingDaysRepository(database),
   };
 }

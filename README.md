@@ -4,7 +4,15 @@
 
 El backend usa Node.js, Express y PostgreSQL. Fuera de Docker, la conexión se configura con `DATABASE_URL`; Compose usa las variables `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` y `PGPASSWORD`. Consulta [.env.example](./.env.example) para la configuración local de Compose.
 
-Requisitos para ejecutarlo fuera de Docker: Node.js 24 o posterior y PostgreSQL con las migraciones [`001_initial_schema.sql`](./backend/database/migrations/001_initial_schema.sql), [`002_teachers_and_schedule.sql`](./backend/database/migrations/002_teachers_and_schedule.sql) y [`003_backdate_initial_schedule_entries.sql`](./backend/database/migrations/003_backdate_initial_schedule_entries.sql) aplicadas. La migración 003 ajusta las asignaciones iniciales del curso local `1` si sus datos coinciden con las precondiciones; en bases que no contengan ese curso no realiza cambios.
+Requisitos para ejecutarlo fuera de Docker: Node.js 24 o posterior y PostgreSQL con las migraciones [`001_initial_schema.sql`](./backend/database/migrations/001_initial_schema.sql), [`002_teachers_and_schedule.sql`](./backend/database/migrations/002_teachers_and_schedule.sql), [`003_backdate_initial_schedule_entries.sql`](./backend/database/migrations/003_backdate_initial_schedule_entries.sql), [`004_backdate_added_schedule_entries.sql`](./backend/database/migrations/004_backdate_added_schedule_entries.sql) y [`005_non_teaching_days.sql`](./backend/database/migrations/005_non_teaching_days.sql) aplicadas. Las migraciones 003 y 004 ajustan vigencias de asignaciones del curso local `1` solo cuando los datos coinciden con las precondiciones; en bases que no contengan esas asignaciones no realizan cambios. La migración 005 crea el calendario de días no lectivos, elimina únicamente seis asistencias coincidentes con las fechas festivas que el usuario autorizó expresamente (si coinciden exactamente con los IDs y datos verificados) y falla ante cualquier otra asistencia en esas fechas.
+
+En un volumen Docker existente, una vez actualizado el checkout y recreado el servicio de base de datos para montar las migraciones, aplica explícitamente las que aún estén pendientes (Compose no vuelve a ejecutar automáticamente los scripts init en volúmenes ya creados):
+
+```sh
+docker compose up -d database
+docker compose exec -T database psql -v ON_ERROR_STOP=1 -U postgres -d registro_asistencia -f /docker-entrypoint-initdb.d/004_backdate_added_schedule_entries.sql
+docker compose exec -T database psql -v ON_ERROR_STOP=1 -U postgres -d registro_asistencia -f /docker-entrypoint-initdb.d/005_non_teaching_days.sql
+```
 
 Instala las dependencias y ejecuta las pruebas desde `backend/`:
 
@@ -38,7 +46,9 @@ Para crear un tramo, envía JSON como `{"subjectId": 3, "teacherId": 8, "weekday
 
 Para borrar definitivamente un tramo creado por error, usa `DELETE /api/v1/schedule/:entryId/permanent`. Solo se borra si no tiene registros de asistencia; si los tiene, la API responde `409 SCHEDULE_ENTRY_HAS_ATTENDANCE` sin eliminar datos. Para terminar un tramo y conservar su historial, usa `DELETE /api/v1/schedule/:entryId` con `{"validUntil":"YYYY-MM-DD"}`. Son operaciones distintas.
 
-El calendario mensual devuelve cada clase con la fecha, materia, profesor, horas, estado y campos de asistencia. Los estados posibles son `present`, `absent` y `late`; sin registro, el estado devuelto es `pending`. Para guardar o corregir un registro, envía por ejemplo `{"status":"late","arrivedAt":"09:12","notes":"Llegada tarde"}` con `PUT` a `/api/v1/schedule/12/attendance/2026-09-07`. `arrivedAt` y `notes` son opcionales; la hora de llegada solo se admite para `late`. `DELETE` sobre esa misma ruta elimina el registro y deja la clase pendiente. La API valida que la fecha sea un día de clase dentro del curso y de la vigencia del tramo; permite fechas pasadas hasta hoy y rechaza fechas futuras.
+El calendario mensual devuelve cada clase con la fecha, materia, profesor, horas, estado y campos de asistencia, e incluye `nonTeachingDays` con las fechas no lectivas del mes dentro del período del curso. Las asignaciones semanales no generan clases en esas fechas. Los estados posibles son `present`, `absent` y `late`; sin registro, el estado devuelto es `pending`. Para guardar o corregir un registro, envía por ejemplo `{"status":"late","arrivedAt":"09:12","notes":"Llegada tarde"}` con `PUT` a `/api/v1/schedule/12/attendance/2026-09-07`. `arrivedAt` y `notes` son opcionales; la hora de llegada solo se admite para `late`. `DELETE` sobre esa misma ruta elimina el registro y deja la clase pendiente. La API valida que la fecha sea un día de clase dentro del curso y de la vigencia del tramo; permite fechas pasadas hasta hoy, rechaza fechas futuras y responde `409 ATTENDANCE_ON_NON_TEACHING_DAY` si se intenta crear, modificar o quitar asistencia en un día no lectivo.
+
+Las fechas confirmadas del curso `2026-2027` se almacenan en `non_teaching_days`, agrupadas por año académico. La migración impide fechas de fin de semana y valida que las seis asistencias expresamente autorizadas coincidan con los registros verificados antes de eliminarlas; falla si encuentra cualquier otro registro de asistencia en festivos. El repositorio consulta PostgreSQL; el calendario mensual expone `nonTeachingDays` y excluye esos días de las clases, y la validación de asistencia también está protegida por un trigger de base de datos.
 
 ## Administración desde el frontend
 

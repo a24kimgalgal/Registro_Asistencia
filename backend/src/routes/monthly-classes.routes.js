@@ -24,16 +24,28 @@ export function createMonthlyClassesRouter({ repositories }) {
       });
     }
 
-    const courseExists = await repositories.courses.exists(courseId);
-    if (!courseExists) {
+    const course = await repositories.courses.findCalendarInfo(courseId);
+    if (!course) {
       return res.status(404).json({
         error: { code: 'COURSE_NOT_FOUND', message: 'Course not found.' },
       });
     }
 
     const monthStart = `${year}-${month}-01`;
-    const classes = await repositories.monthlyClasses.list(courseId, monthStart);
-    return res.json({ courseId, year, month, classes });
+    const monthEnd = new Date(Date.UTC(Number(year), Number(month), 0))
+      .toISOString()
+      .slice(0, 10);
+    const nonTeachingDays = await repositories.nonTeachingDays.list(
+      course.academicYear,
+      monthStart > course.startDate ? monthStart : course.startDate,
+      monthEnd < course.endDate ? monthEnd : course.endDate,
+    );
+    const classes = await repositories.monthlyClasses.list(
+      courseId,
+      monthStart,
+      nonTeachingDays,
+    );
+    return res.json({ courseId, year, month, classes, nonTeachingDays });
   });
 
   return router;
