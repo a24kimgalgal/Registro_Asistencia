@@ -12,6 +12,7 @@ const sections = ['Calendario', 'Materias', 'Horario', 'Administración'];
 const courses = ref([]);
 const selectedCourseId = ref('');
 const classes = ref([]);
+const nonTeachingDays = ref([]);
 const schedule = ref([]);
 const subjects = ref([]);
 const selectedDate = ref(dateKey(new Date()));
@@ -54,6 +55,7 @@ const canGoToNextMonth = computed(() => displayedMonth.value < latestMonth.value
 const isFutureDate = (date) => date > dateKey(new Date());
 
 const classesByDate = computed(() => classes.value.reduce((grouped, classEntry) => {
+  if (nonTeachingDays.value.includes(classEntry.classDate)) return grouped;
   grouped[classEntry.classDate] ??= [];
   grouped[classEntry.classDate].push(classEntry);
   return grouped;
@@ -92,6 +94,7 @@ const calendarDays = computed(() => {
         isToday: dateKey(date) === todayKey,
         isPast: dateKey(date) < todayKey,
         isFuture: dateKey(date) > todayKey,
+        isNonTeachingDay: nonTeachingDays.value.includes(dateKey(date)),
         accessibleDate: new Intl.DateTimeFormat('es-ES', {
           weekday: 'long',
           day: 'numeric',
@@ -194,6 +197,7 @@ async function loadCourseData() {
   const requestId = ++loadRequestId.value;
   if (!selectedCourseId.value) {
     classes.value = [];
+    nonTeachingDays.value = [];
     schedule.value = [];
     subjects.value = [];
     loadingData.value = false;
@@ -219,16 +223,18 @@ async function loadCourseData() {
       apiRequest(`/courses/${courseId}/subjects`),
     ]);
     if (requestId !== loadRequestId.value) return;
+    nonTeachingDays.value = monthResult.nonTeachingDays ?? [];
     classes.value = monthResult.classes.map((classEntry) => ({
       ...classEntry,
       classDate: String(classEntry.classDate).slice(0, 10),
-    }));
+    })).filter((classEntry) => !nonTeachingDays.value.includes(classEntry.classDate));
     schedule.value = scheduleResult.schedule;
     subjects.value = subjectResult.subjects;
   } catch (error) {
     if (requestId !== loadRequestId.value) return;
     dataError.value = error.message;
     classes.value = [];
+    nonTeachingDays.value = [];
     schedule.value = [];
     subjects.value = [];
   } finally {
@@ -536,6 +542,7 @@ onMounted(() => {
                   <span><i class="calendar-date-marker calendar-date-marker--past" aria-hidden="true"></i>Día pasado</span>
                   <span><i class="calendar-date-marker calendar-date-marker--today" aria-hidden="true"></i>Hoy</span>
                   <span><i class="calendar-date-marker calendar-date-marker--future" aria-hidden="true"></i>Fecha futura · solo consulta</span>
+                  <span><i class="calendar-date-marker calendar-date-marker--holiday" aria-hidden="true"></i>Festivo</span>
                 </div>
               </div>
 
@@ -563,7 +570,7 @@ onMounted(() => {
                     class="calendar-day"
                     :class="{ 'calendar-day--outside': !day.inMonth }"
                     role="gridcell"
-                    :aria-label="`${day.accessibleDate}${day.isToday ? ', hoy' : ''}${day.isFuture ? ', fecha futura, solo consulta' : ''}${day.inMonth ? '' : ', fuera del mes seleccionado'}`"
+                    :aria-label="`${day.accessibleDate}${day.isToday ? ', hoy' : ''}${day.isNonTeachingDay ? ', festivo' : ''}${day.isFuture ? ', fecha futura, solo consulta' : ''}${day.inMonth ? '' : ', fuera del mes seleccionado'}`"
                   >
                     <button
                       class="calendar-day-button"
@@ -579,23 +586,28 @@ onMounted(() => {
                       @click="selectDate(day.key)"
                     >
                       <time :datetime="day.key">{{ day.number }}</time>
-                      <span v-if="classesByDate[day.key]" class="calendar-day-count">
-                        {{ classesByDate[day.key].length }}
-                        {{ classesByDate[day.key].length === 1 ? 'clase' : 'clases' }}
+                      <span v-if="day.isNonTeachingDay" class="calendar-holiday-label">
+                        FIESTA
                       </span>
-                      <span
-                        v-if="classesByDate[day.key]"
-                        class="calendar-day-statuses"
-                        :aria-label="classesByDate[day.key].map((entry) => statusLabel(entry.status)).join(', ')"
-                      >
-                        <i
-                          v-for="classEntry in classesByDate[day.key]"
-                          :key="classEntry.scheduleEntryId"
-                          class="legend-dot"
-                          :class="`legend-dot--${classEntry.status}`"
-                          aria-hidden="true"
-                        ></i>
-                      </span>
+                      <template v-else>
+                        <span v-if="classesByDate[day.key]" class="calendar-day-count">
+                          {{ classesByDate[day.key].length }}
+                          {{ classesByDate[day.key].length === 1 ? 'clase' : 'clases' }}
+                        </span>
+                        <span
+                          v-if="classesByDate[day.key]"
+                          class="calendar-day-statuses"
+                          :aria-label="classesByDate[day.key].map((entry) => statusLabel(entry.status)).join(', ')"
+                        >
+                          <i
+                            v-for="classEntry in classesByDate[day.key]"
+                            :key="classEntry.scheduleEntryId"
+                            class="legend-dot"
+                            :class="`legend-dot--${classEntry.status}`"
+                            aria-hidden="true"
+                          ></i>
+                        </span>
+                      </template>
                     </button>
                   </div>
                 </div>
@@ -623,7 +635,10 @@ onMounted(() => {
                 <div class="section-heading">
                   <h3>{{ formatCalendarDate(selectedDate) }}</h3>
                   <div class="selected-day-actions">
-                    <span class="weekday-note">{{ selectedDateClasses.length }} clases</span>
+                    <span v-if="nonTeachingDays.includes(selectedDate)" class="calendar-holiday-label">
+                      FIESTA
+                    </span>
+                    <span v-else class="weekday-note">{{ selectedDateClasses.length }} clases</span>
                     <v-btn
                       v-if="selectedDateClasses.length"
                       color="primary"
@@ -635,6 +650,7 @@ onMounted(() => {
                       Marcar todo el día como presente
                     </v-btn>
                     <v-btn
+                      v-if="!nonTeachingDays.includes(selectedDate)"
                       color="primary"
                       variant="tonal"
                       rounded="lg"
@@ -647,7 +663,10 @@ onMounted(() => {
                 <p v-if="isFutureDate(selectedDate)" class="future-date-note" role="status">
                   Puedes consultar este día, pero la asistencia solo se puede cambiar hasta hoy.
                 </p>
-                <p v-if="!selectedDateClasses.length" class="admin-empty">
+                <p v-if="nonTeachingDays.includes(selectedDate)" class="holiday-date-note" role="status">
+                  Día festivo. No hay clases ni asistencia que registrar.
+                </p>
+                <p v-else-if="!selectedDateClasses.length" class="admin-empty">
                   No hay clases para esta fecha. La plantilla semanal de abajo muestra el horario recurrente del curso.
                 </p>
                 <article

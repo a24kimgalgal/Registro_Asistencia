@@ -137,7 +137,7 @@ describe('Monthly classes endpoint', () => {
     ]);
   });
 
-  test('does not return non-teaching dates outside the course period', async () => {
+  test('returns a holiday before the course starts when it falls in the displayed month', async () => {
     const database = {
       query: jest.fn()
         .mockResolvedValueOnce({
@@ -147,7 +147,9 @@ describe('Monthly classes endpoint', () => {
             endDate: '2027-06-15',
           }],
         })
-        .mockResolvedValueOnce({ rows: [{ date: '2026-09-24' }] })
+        .mockResolvedValueOnce({
+          rows: [{ date: '2026-09-11' }, { date: '2026-09-24' }],
+        })
         .mockResolvedValueOnce({ rows: [] }),
     };
 
@@ -155,7 +157,12 @@ describe('Monthly classes endpoint', () => {
       .get('/api/v1/courses/4/month?year=2026&month=09');
 
     expect(response.status).toBe(200);
-    expect(response.body.nonTeachingDays).toEqual(['2026-09-24']);
+    expect(response.body.nonTeachingDays).toEqual(['2026-09-11', '2026-09-24']);
+    expect(database.query.mock.calls[1][1]).toEqual([
+      '2026-2027',
+      '2026-09-01',
+      '2026-09-30',
+    ]);
   });
 
   test('rejects an invalid month without querying the database', async () => {

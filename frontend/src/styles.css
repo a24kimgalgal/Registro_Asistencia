@@ -287,6 +287,11 @@ body {
   background: #f1f3f0;
 }
 
+.calendar-date-marker--holiday {
+  border-radius: 3px;
+  background: #0876a8;
+}
+
 .calendar-grid {
   overflow: hidden;
   border: 1px solid #e2e8e1;
@@ -380,6 +385,28 @@ body {
 .calendar-day-statuses {
   display: flex;
   gap: 3px;
+}
+
+.calendar-holiday-label {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: #0876a8;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  line-height: 1.4;
+}
+
+.holiday-date-note {
+  border-left: 3px solid #0876a8;
+  margin: 10px 0 0;
+  padding: 8px 11px;
+  background: #eaf5fa;
+  color: #174e67;
+  font-size: 13px;
 }
 
 .calendar-day:last-child {

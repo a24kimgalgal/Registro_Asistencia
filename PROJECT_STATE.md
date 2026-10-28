@@ -17,21 +17,21 @@ Según el calendario del Institut, las casillas azules corresponden a “Festus,
 | Mayo 2027 | 14, 17 |
 | Junio 2027 | Ninguna |
 
-**Criterio para la futura incorporación:** usar exclusivamente estas fechas de lunes a viernes confirmadas por el usuario; no añadir fechas de fin de semana ni deducir otros festivos.
+**Criterio aplicado:** usar exclusivamente estas fechas de lunes a viernes confirmadas por el usuario; no añadir fechas de fin de semana ni deducir otros festivos.
 
 ### Implementación de festivos
 
-El usuario autorizó preparar el almacenamiento persistente. La migración ya está aplicada y el contrato Backend está implementado; quedan reconstruir el contenedor e integrar la presentación en Frontend/Diseño.
+El almacenamiento PostgreSQL y el Backend están implementados y verificados. El Frontend marca cada día no lectivo con la etiqueta azul **FIESTA** en el calendario mensual, en lugar de recuentos o puntos de asistencia, y muestra una explicación al seleccionar el día.
 
-- **Diseño UX/UI:** definir cómo se identifican los días festivos en el calendario y en el detalle del día, y qué mensaje/estado se muestra para que no se confundan con días lectivos sin asistencia registrada. Mantener la vista de lunes a viernes y no proponer cambios ajenos a esta función.
+- **Diseño UX/UI — implementado:** las celdas festivas muestran una etiqueta compacta azul **FIESTA** con texto blanco de alto contraste, en lugar del recuento y los puntos de asistencia. Al seleccionar un día festivo, el detalle explica que no hay clases ni asistencia que registrar y no ofrece acciones de registro.
 - **Base de Datos — implementado y aplicado:** `non_teaching_days(academic_year, day_date)` usa clave primaria compuesta y una restricción que excluye sábados y domingos. La migración carga las 28 fechas confirmadas para `2026-2027` e instala un trigger que rechaza asistencia creada/actualizada directamente en PostgreSQL en un festivo. Tras la confirmación explícita del usuario, eliminó únicamente los seis registros verificados: IDs 67–70 del 24/09 y 116–117 del 12/10 (todos `present`). Se comprobaron 28 festivos, cero asistencias en festivos y cero filas restantes con esos IDs; quedan 104 asistencias en total.
 - **Backend — implementado:** `backend/src/repositories/non-teaching-days.js` consulta PostgreSQL. La respuesta mensual incluye `nonTeachingDays` y la consulta excluye esos días de las clases generadas. PUT y DELETE de asistencia rechazan estas fechas con `409 ATTENDANCE_ON_NON_TEACHING_DAY`.
-- **Contenedor Backend — pendiente de reconstruir:** el servicio sigue ejecutando una imagen anterior que no devuelve `nonTeachingDays`; la reconstrucción falló al descargar `node:24-alpine` por timeout TLS con Docker Hub. La base de datos ya impide insertar asistencias en festivos, aunque la imagen anterior presenta su error genérico. El código local del Backend pasa 33 pruebas; volver a construir la imagen cuando Docker Hub responda.
+- **Backend actualizado y conectado:** la API mensual devuelve `nonTeachingDays` desde PostgreSQL y no genera clases en esas fechas. La metadata incluye todas las fechas festivas del mes del curso, aunque caigan fuera de los límites lectivos del curso; la generación de clases sigue limitada a las fechas del curso.
 - **Datos en conflicto resueltos con autorización del usuario:** se eliminaron las cuatro asistencias del 24/09/2026 (Entorn de Servidor 08:00–09:00 y 09:00–10:00; Projecte 10:00–11:00 y 11:30–12:30) y las dos del 12/10/2026 (Tutoria 10:00–11:00; Entorn de Client 11:30–12:30). La primera ejecución detectó el conflicto y revirtió todos sus cambios; tras la autorización del usuario se ajustó la migración con precondiciones exactas y se aplicó correctamente. Todas las demás asistencias se conservaron.
-- **Frontend:** consumir los días no lectivos de la API y mostrarlos según el diseño acordado; evitar que el usuario registre asistencia en ellos y conservar la navegación y el resto del comportamiento del calendario.
-- **QA/Testing:** cubrir fechas festivas pasadas y futuras, días lectivos normales, exclusión de sábados y domingos y bloqueo de asistencia en días no lectivos; verificar que los datos actuales de asistencia no se alteran.
+- **Frontend — implementado:** consume `nonTeachingDays`, muestra la etiqueta azul **FIESTA** en cada casilla festiva y omite en ella el recuento y los puntos de asistencia. El atributo accesible informa “festivo”; al seleccionar la fecha se explica que no hay clases ni asistencia que registrar y se oculta la acción para marcar asistencia.
+- **QA/Testing — verificado:** pruebas de Frontend cubren etiqueta, ausencia de puntos/recuento, accesibilidad y detalle sin acciones; pruebas de Backend cubren metadata mensual de días festivos previos al inicio lectivo. Resultado: Frontend 24 pruebas; Backend 33 pruebas; build de producción correcto. Verificación visual local en octubre: 12 y 30 aparecen como **FIESTA**; al seleccionar el 12/10 se muestra el aviso y no hay acciones de asistencia.
 
-**Orden restante:** reconstruir el contenedor Backend cuando Docker Hub permita descargar la imagen base; Diseño define la presentación; Frontend consume `nonTeachingDays` y bloquea los controles con una explicación accesible; QA cubre la experiencia y confirma que no se alteran datos.
+**Criterio visual:** un día festivo de lunes a viernes se identifica como **FIESTA** con fondo azul legible, no como día con cero clases/asistencia pendiente. Al seleccionarlo, no se ofrecen acciones de registro. La navegación de lunes a viernes y los indicadores de los demás días se conservan.
 
 ## Estado Actual
 

@@ -37,8 +37,8 @@ export function createMonthlyClassesRouter({ repositories }) {
       .slice(0, 10);
     const nonTeachingDays = await repositories.nonTeachingDays.list(
       course.academicYear,
-      monthStart > course.startDate ? monthStart : course.startDate,
-      monthEnd < course.endDate ? monthEnd : course.endDate,
+      monthStart,
+      monthEnd,
     );
     const classes = await repositories.monthlyClasses.list(
       courseId,

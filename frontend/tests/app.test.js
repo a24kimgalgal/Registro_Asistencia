@@ -63,7 +63,9 @@ describe('initial calendar screen', () => {
           }],
         });
       }
-      if (url.includes('/month?')) return response({ classes: [] });
+      if (url.includes('/month?')) {
+        return response({ classes: [], nonTeachingDays: [futureKey] });
+      }
       if (url.includes('/schedule?')) return response({ schedule: [] });
       if (url.endsWith('/subjects')) return response({ subjects: [] });
       return response({});
@@ -83,9 +85,15 @@ describe('initial calendar screen', () => {
     expect(futureButton.classes()).toContain('calendar-day-button--future');
     expect(futureButton.element.parentElement.getAttribute('aria-label'))
       .toContain('fecha futura, solo consulta');
+    expect(futureButton.element.parentElement.getAttribute('aria-label')).toContain('festivo');
+    expect(futureButton.get('.calendar-holiday-label').text()).toBe('FIESTA');
+    expect(futureButton.find('.calendar-day-count').exists()).toBe(false);
+    expect(futureButton.find('.calendar-day-statuses').exists()).toBe(false);
     await futureButton.trigger('click');
     expect(wrapper.find('.day-classes').text()).toContain('Puedes consultar este día');
     expect(wrapper.find('.day-classes').text()).toContain('la asistencia solo se puede cambiar hasta hoy');
+    expect(wrapper.find('.holiday-date-note').text()).toContain('Día festivo');
+    expect(wrapper.find('.selected-day-actions').findAll('button')).toHaveLength(0);
 
     if (today.getDay() !== 0 && today.getDay() !== 6) {
       const todayButton = wrapper.findAll('.calendar-day-button')
